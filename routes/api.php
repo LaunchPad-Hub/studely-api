@@ -15,11 +15,11 @@ Route::prefix('v1')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     Route::post('/otp/request', [AuthController::class, 'otpRequest']);
     Route::post('/otp/verify', [AuthController::class, 'otpVerify']);
-    Route::get('user', [AuthController::class, 'me']);
 
     Route::middleware(['auth:sanctum', ScopeTenant::class])->group(function () {
 
         // User
+        Route::get('user', [AuthController::class, 'me']);
 
         // Tenants (SuperAdmin only)
         Route::apiResource('tenants', TenantController::class)->middleware('role:SuperAdmin');
