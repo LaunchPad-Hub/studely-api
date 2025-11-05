@@ -127,7 +127,28 @@ class AuthController extends Controller
 
     public function me(Request $request)
     {
-        return response()->json($request->user());
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['user' => null], 200);
+        }
+
+        // Spatie: returns a Collection of strings
+        $firstRole = $user->getRoleNames()->first(); // e.g. "admin" or null
+
+        return response()->json([
+            'user' => [
+                'id'    => $user->id,
+                'name'  => $user->name,
+                'email' => $user->email,
+                'role'  => $firstRole,
+                'tenant_id' => $user->tenant_id,
+                'tenant_name' => $user->tenant->name ?? null
+
+                // optional: keep the full list too
+                // 'roles' => $user->getRoleNames(),
+            ],
+        ]);
     }
 
 }
