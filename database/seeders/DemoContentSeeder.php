@@ -15,6 +15,8 @@ class DemoContentSeeder extends Seeder
     public function run(): void
     {
         DB::transaction(function () {
+            // Create a Faker instance (avoid the undefined fake() helper)
+            $faker = \Faker\Factory::create('en_IN');
 
             // --- Tenant ---
             $tenant = Tenant::firstOrCreate(
@@ -24,10 +26,10 @@ class DemoContentSeeder extends Seeder
 
             // --- Colleges ---
             $colleges = collect([
-                ['name' => 'TechNirma College of Engineering', 'code' => 'ENG', 'location' => 'Pune', 'description' => 'Focuses on engineering and applied sciences.'],
+                ['name' => 'TechNirma College of Engineering', 'code' => 'ENG', 'location' => 'Pune',      'description' => 'Focuses on engineering and applied sciences.'],
                 ['name' => 'Arya College of Management Studies', 'code' => 'MGT', 'location' => 'Bangalore', 'description' => 'Renowned for its business and management programs.'],
                 ['name' => 'Nirma Institute of Computer Science', 'code' => 'CSE', 'location' => 'Hyderabad', 'description' => 'Specializes in software engineering and computing.'],
-                ['name' => 'Vidya College of Communication', 'code' => 'COM', 'location' => 'Mumbai', 'description' => 'Dedicated to soft skills and public communication.'],
+                ['name' => 'Vidya College of Communication',      'code' => 'COM', 'location' => 'Mumbai',    'description' => 'Dedicated to soft skills and public communication.'],
             ])->map(fn($data) => College::firstOrCreate(
                 ['tenant_id' => $tenant->id, 'code' => $data['code']],
                 $data
@@ -37,11 +39,11 @@ class DemoContentSeeder extends Seeder
             $admin = User::firstOrCreate(
                 ['email' => 'admin@technirma.in'],
                 [
-                    'name' => 'Institute Admin',
-                    'tenant_id' => $tenant->id,
-                    'password' => Hash::make('Password!234'),
+                    'name'              => 'Institute Admin',
+                    'tenant_id'         => $tenant->id,
+                    'password'          => Hash::make('Password!234'),
                     'email_verified_at' => now(),
-                    'registered_at' => now(),
+                    'registered_at'     => now(),
                 ]
             );
             if (method_exists($admin, 'assignRole')) {
@@ -62,11 +64,11 @@ class DemoContentSeeder extends Seeder
                 $studentUser = User::firstOrCreate(
                     ['email' => $email],
                     [
-                        'name' => $name,
-                        'password' => Hash::make('Password!234'),
-                        'tenant_id' => $tenant->id,
+                        'name'              => $name,
+                        'password'          => Hash::make('Password!234'),
+                        'tenant_id'         => $tenant->id,
                         'email_verified_at' => now(),
-                        'registered_at' => now(),
+                        'registered_at'     => now(),
                     ]
                 );
 
@@ -84,17 +86,19 @@ class DemoContentSeeder extends Seeder
                         'user_id'   => $studentUser->id,
                     ],
                     [
-                        'college_id' => $college->id,
-                        'reg_no' => 'TN-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT),
-                        'branch' => fake()->randomElement(['Computer Science', 'Electronics', 'Business', 'Communication']),
-                        'cohort' => '2025',
-                        'gender' => $i % 2 === 0 ? 'Male' : 'Female',
-                        'dob' => now()->subYears(rand(19, 22))->subMonths(rand(1, 11)),
-                        'admission_year' => 2022,
-                        'current_semester' => rand(4, 6),
-                        'meta' => [
-                            'phone' => '+91' . rand(7000000000, 9999999999),
-                            'address' => fake()->city(),
+                        'college_id'        => $college->id,
+                        'reg_no'            => 'TN-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT),
+                        'branch'            => $faker->randomElement(['Computer Science', 'Electronics', 'Business', 'Communication']),
+                        'cohort'            => '2025',
+                        'gender'            => $i % 2 === 0 ? 'Male' : 'Female',
+                        // Keep DOB roughly 19–22 years ago with some month variance
+                        'dob'               => now()->subYears($faker->numberBetween(19, 22))->subMonths($faker->numberBetween(1, 11)),
+                        'admission_year'    => 2022,
+                        'current_semester'  => $faker->numberBetween(4, 6),
+                        'meta'              => [
+                            // Use numerify to avoid integer overflow issues on some systems
+                            'phone'   => '+91' . $faker->numerify('7#########'),
+                            'address' => $faker->city(),
                         ],
                     ]
                 );
@@ -103,20 +107,20 @@ class DemoContentSeeder extends Seeder
             // --- Assessments ---
             $assessments = [
                 ['title' => 'Baseline Assessment', 'type' => 'MCQ'],
-                ['title' => 'Final Assessment', 'type' => 'MCQ'],
+                ['title' => 'Final Assessment',    'type' => 'MCQ'],
             ];
 
             foreach ($assessments as $assInfo) {
                 $assessment = Assessment::firstOrCreate(
                     [
                         'tenant_id' => $tenant->id,
-                        'title' => $assInfo['title'],
+                        'title'     => $assInfo['title'],
                     ],
                     [
-                        'type' => $assInfo['type'],
+                        'type'         => $assInfo['type'],
                         'instructions' => 'Please attempt all questions carefully.',
-                        'total_marks' => 100,
-                        'is_active' => true,
+                        'total_marks'  => 100,
+                        'is_active'    => true,
                     ]
                 );
 
@@ -132,46 +136,46 @@ class DemoContentSeeder extends Seeder
                     'Personality Development',
                 ];
 
-                foreach (collect($moduleTitles)->take(rand(7, 8)) as $order => $title) {
+                foreach (collect($moduleTitles)->take($faker->numberBetween(7, 8)) as $order => $title) {
                     $module = Module::firstOrCreate(
                         [
-                            'tenant_id' => $tenant->id,
+                            'tenant_id'     => $tenant->id,
                             'assessment_id' => $assessment->id,
-                            'title' => $title,
+                            'title'         => $title,
                         ],
                         [
-                            'code' => 'MOD-' . Str::upper(Str::slug($title, '-')),
-                            'start_at' => now()->subDays(rand(5, 20)),
-                            'end_at' => now()->addDays(rand(5, 20)),
-                            'per_student_time_limit_min' => 45,
-                            'order' => $order + 1,
+                            'code'                        => 'MOD-' . Str::upper(Str::slug($title, '-')),
+                            'start_at'                    => now()->subDays($faker->numberBetween(5, 20)),
+                            'end_at'                      => now()->addDays($faker->numberBetween(5, 20)),
+                            'per_student_time_limit_min'  => 45,
+                            'order'                       => $order + 1,
                         ]
                     );
 
                     // --- Add few questions per module ---
                     foreach (range(1, 5) as $qNo) {
                         $stem = match ($title) {
-                            'Quantitative Aptitude' => "If A can complete a task in 10 days and B in 15 days, how long will they take together?",
-                            'Logical Reasoning' => "Find the next number in the series: 2, 6, 12, 20, ?",
-                            'Verbal Ability' => "Choose the correct synonym of 'Eloquent'.",
-                            'Technical Knowledge' => "What does CPU stand for?",
-                            'Computer Fundamentals' => "Which of the following is an input device?",
-                            'Software Engineering Basics' => "Which model follows a linear sequential approach?",
-                            'Communication Skills' => "Which is most important for effective communication?",
-                            default => "What is 2 + 2?",
+                            'Quantitative Aptitude'     => "If A can complete a task in 10 days and B in 15 days, how long will they take together?",
+                            'Logical Reasoning'         => "Find the next number in the series: 2, 6, 12, 20, ?",
+                            'Verbal Ability'            => "Choose the correct synonym of 'Eloquent'.",
+                            'Technical Knowledge'       => "What does CPU stand for?",
+                            'Computer Fundamentals'     => "Which of the following is an input device?",
+                            'Software Engineering Basics'=> "Which model follows a linear sequential approach?",
+                            'Communication Skills'      => "Which is most important for effective communication?",
+                            default                     => "What is 2 + 2?",
                         };
 
                         $question = Question::firstOrCreate(
                             [
                                 'tenant_id' => $tenant->id,
                                 'module_id' => $module->id,
-                                'stem' => $stem,
+                                'stem'      => $stem,
                             ],
                             [
-                                'type' => 'MCQ',
-                                'difficulty' => ['easy', 'medium', 'hard'][rand(0, 2)],
-                                'topic' => Str::slug($title),
-                                'tags' => [$title, 'assessment', 'practice'],
+                                'type'       => 'MCQ',
+                                'difficulty' => $faker->randomElement(['easy', 'medium', 'hard']),
+                                'topic'      => Str::slug($title),
+                                'tags'       => [$title, 'assessment', 'practice'],
                             ]
                         );
 
@@ -179,9 +183,9 @@ class DemoContentSeeder extends Seeder
                         $options = match ($title) {
                             'Quantitative Aptitude' => [
                                 ['10 days', false],
-                                ['6 days', true],
+                                ['6 days',  true],
                                 ['12 days', false],
-                                ['8 days', false],
+                                ['8 days',  false],
                             ],
                             'Logical Reasoning' => [
                                 ['30', false],
@@ -192,31 +196,31 @@ class DemoContentSeeder extends Seeder
                             'Verbal Ability' => [
                                 ['Fluent', true],
                                 ['Silent', false],
-                                ['Angry', false],
+                                ['Angry',  false],
                                 ['Simple', false],
                             ],
                             'Technical Knowledge' => [
                                 ['Central Processing Unit', true],
-                                ['Control Power Unit', false],
+                                ['Control Power Unit',      false],
                                 ['Compute Processing Utility', false],
-                                ['Central Parallel Unit', false],
+                                ['Central Parallel Unit',     false],
                             ],
                             'Computer Fundamentals' => [
-                                ['Monitor', false],
-                                ['Printer', false],
+                                ['Monitor',  false],
+                                ['Printer',  false],
                                 ['Keyboard', true],
-                                ['Speaker', false],
+                                ['Speaker',  false],
                             ],
                             'Software Engineering Basics' => [
                                 ['Waterfall Model', true],
-                                ['Spiral Model', false],
-                                ['Agile Model', false],
-                                ['RAD Model', false],
+                                ['Spiral Model',    false],
+                                ['Agile Model',     false],
+                                ['RAD Model',       false],
                             ],
                             'Communication Skills' => [
-                                ['Listening', true],
-                                ['Speaking fast', false],
-                                ['Using jargon', false],
+                                ['Listening',       true],
+                                ['Speaking fast',   false],
+                                ['Using jargon',    false],
                                 ['Interrupting others', false],
                             ],
                             default => [
@@ -231,7 +235,7 @@ class DemoContentSeeder extends Seeder
                             Option::firstOrCreate(
                                 [
                                     'question_id' => $question->id,
-                                    'label' => $label,
+                                    'label'       => $label,
                                 ],
                                 ['is_correct' => $isCorrect]
                             );
