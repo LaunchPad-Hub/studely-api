@@ -9,15 +9,24 @@ use Illuminate\Support\Str;
 use App\Models\{
     Tenant, User, Student, Assessment, College, Module, Question, Option
 };
-use Faker\Factory;
 
 class DemoContentSeeder extends Seeder
 {
     public function run(): void
     {
         DB::transaction(function () {
-            // Create a Faker instance (avoid the undefined fake() helper)
-            $faker = Factory::create('en_IN');
+            // --- Tiny inline helpers (no Faker) ---
+            $pick = fn(array $arr) => $arr[array_rand($arr)];
+            $num  = fn(int $min, int $max) => random_int($min, $max);
+            $digits = function (int $len) {
+                $s = '';
+                for ($i = 0; $i < $len; $i++) $s .= (string) random_int(0, 9);
+                return $s;
+            };
+
+            // Some static data to pick from
+            $branches = ['Computer Science', 'Electronics', 'Business', 'Communication'];
+            $cities   = ['Pune', 'Bangalore', 'Hyderabad', 'Mumbai', 'Delhi', 'Ahmedabad', 'Jaipur', 'Kolkata', 'Chennai'];
 
             // --- Tenant ---
             $tenant = Tenant::firstOrCreate(
@@ -80,6 +89,13 @@ class DemoContentSeeder extends Seeder
                 // --- Pick random college ---
                 $college = $colleges->random();
 
+                // --- DOB: ~19–22 years ago with some month/day variance
+                $dob = now()
+                    ->clone()
+                    ->subYears($num(19, 22))
+                    ->subMonths($num(1, 11))
+                    ->subDays($num(0, 27));
+
                 // --- Create linked Student ---
                 Student::firstOrCreate(
                     [
@@ -89,17 +105,15 @@ class DemoContentSeeder extends Seeder
                     [
                         'college_id'        => $college->id,
                         'reg_no'            => 'TN-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT),
-                        'branch'            => $faker->randomElement(['Computer Science', 'Electronics', 'Business', 'Communication']),
+                        'branch'            => $pick($branches),
                         'cohort'            => '2025',
                         'gender'            => $i % 2 === 0 ? 'Male' : 'Female',
-                        // Keep DOB roughly 19–22 years ago with some month variance
-                        'dob'               => now()->subYears($faker->numberBetween(19, 22))->subMonths($faker->numberBetween(1, 11)),
+                        'dob'               => $dob,
                         'admission_year'    => 2022,
-                        'current_semester'  => $faker->numberBetween(4, 6),
+                        'current_semester'  => $num(4, 6),
                         'meta'              => [
-                            // Use numerify to avoid integer overflow issues on some systems
-                            'phone'   => '+91' . $faker->numerify('7#########'),
-                            'address' => $faker->city(),
+                            'phone'   => '+91' . $digits(10), // simple 10-digit Indian mobile
+                            'address' => $pick($cities),
                         ],
                     ]
                 );
@@ -137,7 +151,9 @@ class DemoContentSeeder extends Seeder
                     'Personality Development',
                 ];
 
-                foreach (collect($moduleTitles)->take($faker->numberBetween(7, 8)) as $order => $title) {
+                // 7 or 8 modules
+                $count = $num(7, 8);
+                foreach (array_values(array_slice($moduleTitles, 0, $count)) as $order => $title) {
                     $module = Module::firstOrCreate(
                         [
                             'tenant_id'     => $tenant->id,
@@ -146,8 +162,8 @@ class DemoContentSeeder extends Seeder
                         ],
                         [
                             'code'                        => 'MOD-' . Str::upper(Str::slug($title, '-')),
-                            'start_at'                    => now()->subDays($faker->numberBetween(5, 20)),
-                            'end_at'                      => now()->addDays($faker->numberBetween(5, 20)),
+                            'start_at'                    => now()->clone()->subDays($num(5, 20)),
+                            'end_at'                      => now()->clone()->addDays($num(5, 20)),
                             'per_student_time_limit_min'  => 45,
                             'order'                       => $order + 1,
                         ]
@@ -156,14 +172,14 @@ class DemoContentSeeder extends Seeder
                     // --- Add few questions per module ---
                     foreach (range(1, 5) as $qNo) {
                         $stem = match ($title) {
-                            'Quantitative Aptitude'     => "If A can complete a task in 10 days and B in 15 days, how long will they take together?",
-                            'Logical Reasoning'         => "Find the next number in the series: 2, 6, 12, 20, ?",
-                            'Verbal Ability'            => "Choose the correct synonym of 'Eloquent'.",
-                            'Technical Knowledge'       => "What does CPU stand for?",
-                            'Computer Fundamentals'     => "Which of the following is an input device?",
+                            'Quantitative Aptitude'      => "If A can complete a task in 10 days and B in 15 days, how long will they take together?",
+                            'Logical Reasoning'          => "Find the next number in the series: 2, 6, 12, 20, ?",
+                            'Verbal Ability'             => "Choose the correct synonym of 'Eloquent'.",
+                            'Technical Knowledge'        => "What does CPU stand for?",
+                            'Computer Fundamentals'      => "Which of the following is an input device?",
                             'Software Engineering Basics'=> "Which model follows a linear sequential approach?",
-                            'Communication Skills'      => "Which is most important for effective communication?",
-                            default                     => "What is 2 + 2?",
+                            'Communication Skills'       => "Which is most important for effective communication?",
+                            default                      => "What is 2 + 2?",
                         };
 
                         $question = Question::firstOrCreate(
@@ -174,7 +190,7 @@ class DemoContentSeeder extends Seeder
                             ],
                             [
                                 'type'       => 'MCQ',
-                                'difficulty' => $faker->randomElement(['easy', 'medium', 'hard']),
+                                'difficulty' => $pick(['easy', 'medium', 'hard']),
                                 'topic'      => Str::slug($title),
                                 'tags'       => [$title, 'assessment', 'practice'],
                             ]
@@ -245,7 +261,7 @@ class DemoContentSeeder extends Seeder
                 }
             }
 
-            $this->command->info('✅ Demo content seeded successfully with realistic Indian data.');
+            $this->command->info('✅ Demo content seeded successfully without Faker (cPanel-safe).');
         });
     }
 }
