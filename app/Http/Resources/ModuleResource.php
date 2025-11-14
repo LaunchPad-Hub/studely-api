@@ -23,8 +23,8 @@ class ModuleResource extends JsonResource
             'end_at'  => optional($this->end_at)->toISOString(),
             'time_limit_min' => $this->per_student_time_limit_min,
             'order'   => $this->order,
-            'assessment'   => $this->assessment,
-            'questions'    => QuestionResource::collection($this->whenLoaded('questions')),
+            'assessment'       => new AssessmentResource($this->whenLoaded('assessment')),
+            'questions'        => QuestionResource::collection($this->whenLoaded('questions')),
             'status'   => $this->status,
         ];
     }

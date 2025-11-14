@@ -14,11 +14,13 @@ return new class extends Migration
         Schema::create('assessments', function (Blueprint $table) {
             $table->id();
             $table->foreignId('tenant_id')->constrained();
-            $table->enum('type',['MCQ','RUBRIC'])->default('MCQ');
+            $table->enum('type',['MCQ','RUBRIC', 'online', 'offline'])->default('MCQ');
             $table->string('title');
             $table->text('instructions')->nullable();
             $table->integer('total_marks')->default(0);
             $table->boolean('is_active')->default(true);
+            $table->timestamp('open_at')->nullable();
+            $table->timestamp('close_at')->nullable();
             $table->timestamps();
         });
     }

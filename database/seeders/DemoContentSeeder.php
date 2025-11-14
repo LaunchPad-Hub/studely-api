@@ -24,7 +24,6 @@ class DemoContentSeeder extends Seeder
                 return $s;
             };
 
-            // Some static data to pick from
             $branches = ['Computer Science', 'Electronics', 'Business', 'Communication'];
             $cities   = ['Pune', 'Bangalore', 'Hyderabad', 'Mumbai', 'Delhi', 'Ahmedabad', 'Jaipur', 'Kolkata', 'Chennai'];
 
@@ -36,10 +35,10 @@ class DemoContentSeeder extends Seeder
 
             // --- Colleges ---
             $colleges = collect([
-                ['name' => 'TechNirma College of Engineering', 'code' => 'ENG', 'location' => 'Pune',      'description' => 'Focuses on engineering and applied sciences.'],
-                ['name' => 'Arya College of Management Studies', 'code' => 'MGT', 'location' => 'Bangalore', 'description' => 'Renowned for its business and management programs.'],
-                ['name' => 'Nirma Institute of Computer Science', 'code' => 'CSE', 'location' => 'Hyderabad', 'description' => 'Specializes in software engineering and computing.'],
-                ['name' => 'Vidya College of Communication',      'code' => 'COM', 'location' => 'Mumbai',    'description' => 'Dedicated to soft skills and public communication.'],
+                ['name' => 'TechNirma College of Engineering',     'code' => 'ENG', 'location' => 'Pune',      'description' => 'Focuses on engineering and applied sciences.'],
+                ['name' => 'Arya College of Management Studies',   'code' => 'MGT', 'location' => 'Bangalore', 'description' => 'Renowned for its business and management programs.'],
+                ['name' => 'Nirma Institute of Computer Science',  'code' => 'CSE', 'location' => 'Hyderabad', 'description' => 'Specializes in software engineering and computing.'],
+                ['name' => 'Vidya College of Communication',       'code' => 'COM', 'location' => 'Mumbai',    'description' => 'Dedicated to soft skills and public communication.'],
             ])->map(fn($data) => College::firstOrCreate(
                 ['tenant_id' => $tenant->id, 'code' => $data['code']],
                 $data
@@ -60,7 +59,7 @@ class DemoContentSeeder extends Seeder
                 $admin->assignRole('CollegeAdmin');
             }
 
-            // --- Create realistic Indian student names ---
+            // --- Students ---
             $studentNames = [
                 'Aarav Sharma', 'Diya Patel', 'Ishaan Mehta', 'Priya Nair', 'Rohan Iyer',
                 'Ananya Reddy', 'Karan Gupta', 'Sneha Raj', 'Devansh Das', 'Meera Singh',
@@ -70,7 +69,6 @@ class DemoContentSeeder extends Seeder
             foreach ($studentNames as $i => $name) {
                 $email = strtolower(Str::slug($name, '.')) . '@technirma.in';
 
-                // --- Create User ---
                 $studentUser = User::firstOrCreate(
                     ['email' => $email],
                     [
@@ -86,17 +84,14 @@ class DemoContentSeeder extends Seeder
                     $studentUser->assignRole('Student');
                 }
 
-                // --- Pick random college ---
                 $college = $colleges->random();
 
-                // --- DOB: ~19–22 years ago with some month/day variance
                 $dob = now()
                     ->clone()
                     ->subYears($num(19, 22))
                     ->subMonths($num(1, 11))
                     ->subDays($num(0, 27));
 
-                // --- Create linked Student ---
                 Student::firstOrCreate(
                     [
                         'tenant_id' => $tenant->id,
@@ -112,20 +107,221 @@ class DemoContentSeeder extends Seeder
                         'admission_year'    => 2022,
                         'current_semester'  => $num(4, 6),
                         'meta'              => [
-                            'phone'   => '+91' . $digits(10), // simple 10-digit Indian mobile
+                            'phone'   => '+91' . $digits(10),
                             'address' => $pick($cities),
                         ],
                     ]
                 );
             }
 
-            // --- Assessments ---
-            $assessments = [
-                ['title' => 'Baseline Assessment', 'type' => 'MCQ'],
-                ['title' => 'Final Assessment',    'type' => 'MCQ'],
+            /* -----------------------------------------------------------------
+             |  ASSESSMENTS + MODULES + QUESTIONS
+             |  Baseline + Final, each with ordered modules and questions.
+             |  Modules have status: "unlocked" / "locked" for progression.
+             * ---------------------------------------------------------------- */
+
+            $assessmentDefs = [
+                [
+                    'title'       => 'Baseline Assessment',
+                    'type'        => 'online',
+                    'instructions'=> 'This baseline assessment measures the student’s current level across multiple categories before any training. Complete all modules in order.',
+                    'total_marks' => 100,
+                    'is_active'   => true,
+                    'open_at'     => now()->clone()->subDays(7),
+                    'close_at'    => now()->clone()->addDays(7),
+                ],
+                [
+                    'title'       => 'Final Assessment',
+                    'type'        => 'online',
+                    'instructions'=> 'This final assessment compares performance after the training program. Complete all modules in order.',
+                    'total_marks' => 100,
+                    'is_active'   => true,
+                    'open_at'     => now()->clone()->addDays(15),
+                    'close_at'    => now()->clone()->addDays(30),
+                ],
             ];
 
-            foreach ($assessments as $assInfo) {
+            // Shared module “templates” so Baseline/Final mirror each other
+            $moduleTemplates = [
+                [
+                    'title'   => 'Quantitative Aptitude',
+                    'code'    => 'QA',
+                    'minutes' => 30,
+                ],
+                [
+                    'title'   => 'Logical Reasoning',
+                    'code'    => 'LR',
+                    'minutes' => 30,
+                ],
+                [
+                    'title'   => 'Verbal Ability',
+                    'code'    => 'VA',
+                    'minutes' => 25,
+                ],
+                [
+                    'title'   => 'Technical Fundamentals',
+                    'code'    => 'TF',
+                    'minutes' => 35,
+                ],
+            ];
+
+            // Question “banks” per module title (baseline content, but it’s fine to reuse)
+            $questionBank = [
+                'Quantitative Aptitude' => [
+                    [
+                        'stem'    => 'If A can complete a task in 10 days and B in 15 days, in how many days can they complete it together?',
+                        'options' => [
+                            ['10 days', false],
+                            ['6 days',  true],
+                            ['12 days', false],
+                            ['8 days',  false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'What is the compound interest on ₹10,000 at 10% per annum for 2 years (compounded annually)?',
+                        'options' => [
+                            ['₹2,000', false],
+                            ['₹2,100', true],
+                            ['₹1,000', false],
+                            ['₹1,900', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'The average of five numbers is 28. If one number is removed, the average becomes 26. What is the removed number?',
+                        'options' => [
+                            ['36', true],
+                            ['30', false],
+                            ['32', false],
+                            ['40', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'A train 180 m long passes a man standing on the platform in 9 seconds. What is its speed in km/h?',
+                        'options' => [
+                            ['60 km/h', false],
+                            ['72 km/h', true],
+                            ['54 km/h', false],
+                            ['80 km/h', false],
+                        ],
+                    ],
+                ],
+                'Logical Reasoning' => [
+                    [
+                        'stem'    => 'Find the next number in the series: 2, 6, 12, 20, ?',
+                        'options' => [
+                            ['28', true],
+                            ['26', false],
+                            ['30', false],
+                            ['32', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'If ALL = 25 and BAT = 43, then CAT = ? (Assume A=1, B=2,... Z=26 and sum the letters).',
+                        'options' => [
+                            ['24', false],
+                            ['29', true],
+                            ['30', false],
+                            ['27', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'RAIL : LIAR :: GATE : ?',
+                        'options' => [
+                            ['TEAG', false],
+                            ['EATG', false],
+                            ['EAGT', true],
+                            ['TEGA', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'In a certain code, TREE is written as UCSF. How is BOOK written in that code?',
+                        'options' => [
+                            ['CPPM', true],
+                            ['CQQM', false],
+                            ['AOOL', false],
+                            ['BNPL', false],
+                        ],
+                    ],
+                ],
+                'Verbal Ability' => [
+                    [
+                        'stem'    => 'Choose the correct synonym of "Eloquent".',
+                        'options' => [
+                            ['Fluent', true],
+                            ['Silent', false],
+                            ['Angry',  false],
+                            ['Simple', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'Fill in the blank: "The teacher asked the students to _____ their homework on time."',
+                        'options' => [
+                            ['submit', true],
+                            ['admit',  false],
+                            ['omit',   false],
+                            ['permit', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'Identify the correctly punctuated sentence.',
+                        'options' => [
+                            ['"Its a nice day", she said.', false],
+                            ['"It\'s a nice day," she said.', true],
+                            ['"Its a nice day," she said.', false],
+                            ['"It\'s a nice day", she said.', false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'Choose the word that is closest in meaning to "meticulous".',
+                        'options' => [
+                            ['Careful', true],
+                            ['Careless', false],
+                            ['Lazy',     false],
+                            ['Quick',    false],
+                        ],
+                    ],
+                ],
+                'Technical Fundamentals' => [
+                    [
+                        'stem'    => 'What does CPU stand for?',
+                        'options' => [
+                            ['Central Processing Unit', true],
+                            ['Control Power Unit',      false],
+                            ['Compute Processing Utility', false],
+                            ['Central Parallel Unit',     false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'Which of the following is an input device?',
+                        'options' => [
+                            ['Monitor',  false],
+                            ['Printer',  false],
+                            ['Keyboard', true],
+                            ['Speaker',  false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'Which model in software engineering follows a linear sequential approach?',
+                        'options' => [
+                            ['Waterfall Model', true],
+                            ['Spiral Model',    false],
+                            ['Agile Model',     false],
+                            ['RAD Model',       false],
+                        ],
+                    ],
+                    [
+                        'stem'    => 'In a relational database, a collection of related records is called:',
+                        'options' => [
+                            ['Field', false],
+                            ['Table', true],
+                            ['Cell',  false],
+                            ['Index', false],
+                        ],
+                    ],
+                ],
+            ];
+
+            foreach ($assessmentDefs as $assIndex => $assInfo) {
                 $assessment = Assessment::firstOrCreate(
                     [
                         'tenant_id' => $tenant->id,
@@ -133,27 +329,26 @@ class DemoContentSeeder extends Seeder
                     ],
                     [
                         'type'         => $assInfo['type'],
-                        'instructions' => 'Please attempt all questions carefully.',
-                        'total_marks'  => 100,
-                        'is_active'    => true,
+                        'instructions' => $assInfo['instructions'],
+                        'total_marks'  => $assInfo['total_marks'],
+                        'is_active'    => $assInfo['is_active'],
+                        'open_at'      => $assInfo['open_at'],
+                        'close_at'     => $assInfo['close_at'],
                     ]
                 );
 
-                // --- Modules ---
-                $moduleTitles = [
-                    'Quantitative Aptitude',
-                    'Logical Reasoning',
-                    'Verbal Ability',
-                    'Technical Knowledge',
-                    'Computer Fundamentals',
-                    'Software Engineering Basics',
-                    'Communication Skills',
-                    'Personality Development',
-                ];
+                // --- Modules for this assessment ---
+                foreach ($moduleTemplates as $order => $tpl) {
+                    $baseTitle = $tpl['title'];
+                    $title     = $assInfo['title'] . ' - ' . $baseTitle;
+                    $code      = strtoupper($tpl['code']) . '-' . ($assIndex === 0 ? 'B' : 'F');
 
-                // 7 or 8 modules
-                $count = $num(7, 8);
-                foreach (array_values(array_slice($moduleTitles, 0, $count)) as $order => $title) {
+                    // module progression:
+                    //  - order 1: "unlocked"
+                    //  - others : "locked" (your engine enforces this)
+                    $status = $order === 0 ? 'unlocked' : 'locked';
+
+                    $startOffset = $assIndex === 0 ? -5 : 20; // baseline earlier, final later
                     $module = Module::firstOrCreate(
                         [
                             'tenant_id'     => $tenant->id,
@@ -161,107 +356,59 @@ class DemoContentSeeder extends Seeder
                             'title'         => $title,
                         ],
                         [
-                            'code'                        => 'MOD-' . Str::upper(Str::slug($title, '-')),
-                            'start_at'                    => now()->clone()->subDays($num(5, 20)),
-                            'end_at'                      => now()->clone()->addDays($num(5, 20)),
-                            'per_student_time_limit_min'  => 45,
-                            'order'                       => $order + 1,
+                            'code'                       => $code,
+                            'start_at'                   => now()->clone()->addDays($startOffset + $order),
+                            'end_at'                     => now()->clone()->addDays($startOffset + $order + 3),
+                            'per_student_time_limit_min' => $tpl['minutes'],
+                            'order'                      => $order + 1,
+                            'status'                     => $status,
                         ]
                     );
 
-                    // --- Add few questions per module ---
-                    foreach (range(1, 5) as $qNo) {
-                        $stem = match ($title) {
-                            'Quantitative Aptitude'      => "If A can complete a task in 10 days and B in 15 days, how long will they take together?",
-                            'Logical Reasoning'          => "Find the next number in the series: 2, 6, 12, 20, ?",
-                            'Verbal Ability'             => "Choose the correct synonym of 'Eloquent'.",
-                            'Technical Knowledge'        => "What does CPU stand for?",
-                            'Computer Fundamentals'      => "Which of the following is an input device?",
-                            'Software Engineering Basics'=> "Which model follows a linear sequential approach?",
-                            'Communication Skills'       => "Which is most important for effective communication?",
-                            default                      => "What is 2 + 2?",
-                        };
+                    // --- Questions for this module ---
+                    $questionsForModule = $questionBank[$baseTitle] ?? [
+                        [
+                            'stem'    => 'What is 2 + 2?',
+                            'options' => [
+                                ['4', true],
+                                ['5', false],
+                                ['3', false],
+                                ['6', false],
+                            ],
+                        ],
+                    ];
 
+                    foreach ($questionsForModule as $qData) {
                         $question = Question::firstOrCreate(
                             [
                                 'tenant_id' => $tenant->id,
                                 'module_id' => $module->id,
-                                'stem'      => $stem,
+                                'stem'      => $qData['stem'],
                             ],
                             [
                                 'type'       => 'MCQ',
                                 'difficulty' => $pick(['easy', 'medium', 'hard']),
-                                'topic'      => Str::slug($title),
-                                'tags'       => [$title, 'assessment', 'practice'],
+                                'topic'      => Str::slug($baseTitle),
+                                'tags'       => [$baseTitle, 'assessment', $assInfo['title']],
                             ]
                         );
 
-                        // --- Options ---
-                        $options = match ($title) {
-                            'Quantitative Aptitude' => [
-                                ['10 days', false],
-                                ['6 days',  true],
-                                ['12 days', false],
-                                ['8 days',  false],
-                            ],
-                            'Logical Reasoning' => [
-                                ['30', false],
-                                ['28', true],
-                                ['26', false],
-                                ['24', false],
-                            ],
-                            'Verbal Ability' => [
-                                ['Fluent', true],
-                                ['Silent', false],
-                                ['Angry',  false],
-                                ['Simple', false],
-                            ],
-                            'Technical Knowledge' => [
-                                ['Central Processing Unit', true],
-                                ['Control Power Unit',      false],
-                                ['Compute Processing Utility', false],
-                                ['Central Parallel Unit',     false],
-                            ],
-                            'Computer Fundamentals' => [
-                                ['Monitor',  false],
-                                ['Printer',  false],
-                                ['Keyboard', true],
-                                ['Speaker',  false],
-                            ],
-                            'Software Engineering Basics' => [
-                                ['Waterfall Model', true],
-                                ['Spiral Model',    false],
-                                ['Agile Model',     false],
-                                ['RAD Model',       false],
-                            ],
-                            'Communication Skills' => [
-                                ['Listening',       true],
-                                ['Speaking fast',   false],
-                                ['Using jargon',    false],
-                                ['Interrupting others', false],
-                            ],
-                            default => [
-                                ['4', true],
-                                ['5', false],
-                                ['6', false],
-                                ['3', false],
-                            ],
-                        };
-
-                        foreach ($options as [$label, $isCorrect]) {
+                        foreach ($qData['options'] as [$label, $isCorrect]) {
                             Option::firstOrCreate(
                                 [
                                     'question_id' => $question->id,
                                     'label'       => $label,
                                 ],
-                                ['is_correct' => $isCorrect]
+                                [
+                                    'is_correct' => $isCorrect,
+                                ]
                             );
                         }
                     }
                 }
             }
 
-            $this->command->info('✅ Demo content seeded successfully without Faker (cPanel-safe).');
+            $this->command?->info('✅ Demo content seeded successfully with Baseline/Final assessments, modules & questions.');
         });
     }
 }

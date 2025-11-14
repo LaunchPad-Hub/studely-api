@@ -24,6 +24,7 @@ class AttemptResource extends JsonResource
             'score' => $this->score,
             'assessment' => new AssessmentResource($this->whenLoaded('assessment')),
             'responses'  => ResponseResource::collection($this->whenLoaded('responses')),
+
         ];
     }
 }

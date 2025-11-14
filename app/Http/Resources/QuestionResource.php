@@ -16,8 +16,9 @@ class QuestionResource extends JsonResource
     {
         return [
             'id'     => $this->id,
-            'type'   => $this->type,
-            'stem'   => $this->stem,
+            'type'     => $this->type,      // "MCQ" | "ESSAY" | ...
+            'prompt'   => $this->stem,      // alias for frontend
+            'marks'    => $this->marks ?? null, // if you have it, else null
             'difficulty' => $this->difficulty,
             'topic'  => $this->topic,
             'tags'   => $this->tags,

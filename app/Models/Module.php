@@ -26,4 +26,8 @@ class Module extends Model
         return $this->belongsTo(Assessment::class);
     }
 
+    public function questions()
+    {
+        return $this->hasMany(Question::class);
+    }
 }
