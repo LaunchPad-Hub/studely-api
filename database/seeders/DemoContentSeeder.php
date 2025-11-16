@@ -50,6 +50,7 @@ class DemoContentSeeder extends Seeder
                 [
                     'name'              => 'Institute Admin',
                     'tenant_id'         => $tenant->id,
+                    'college_id'         => $colleges->random()->id,
                     'password'          => Hash::make('Password!234'),
                     'email_verified_at' => now(),
                     'registered_at'     => now(),

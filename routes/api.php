@@ -23,8 +23,9 @@ Route::prefix('v1')->group(function () {
         // User
         Route::get('user', [AuthController::class, 'me']);
 
-        // Student dashboard
+        // Admin | Student dashboard
         Route::get('dashboard/student', [DashboardController::class, 'student']);
+        Route::get('dashboard/admin', [DashboardController::class, 'admin']);
 
         // Tenants (SuperAdmin only)
         Route::apiResource('tenants', TenantController::class)->middleware('role:SuperAdmin');
