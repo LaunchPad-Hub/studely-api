@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Attempts\SaveProgressRequest;
 use App\Http\Resources\AttemptResource;
-use App\Models\{Assessment, Attempt, Question, Response, User};
+use App\Models\{Assessment, Attempt, Question, Response, Student, User};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -227,7 +227,7 @@ class AttemptController extends Controller
     public function submit(Request $r, $attemptId)
     {
         $tid  = app('tenant.id');
-        $user = $r->user();
+        $user = User::with('student')->find(Auth::id());
 
         if (!$user) {
             abort(401, 'Unauthenticated');
@@ -280,33 +280,19 @@ class AttemptController extends Controller
                 }
             }
 
-            // --- 2. Calculate Status (Pass/Fail) ---
-            // $totalPossible = $attempt->assessment->total_marks;
-            // $passingPercent = $attempt->assessment->passing_percentage ?? 0; // Default to 0 if not set
-
-            // // Default status
-            // $status = 'failed';
-
-            // if ($totalPossible > 0) {
-            //     // Calculate percentage with 2 decimal precision (optional)
-            //     $achievedPercent = ($score / $totalPossible) * 100;
-
-            //     if ($achievedPercent >= $passingPercent) {
-            //         $status = 'passed';
-            //     }
-            // } else {
-            //     // Edge case: Assessment has 0 total points (e.g. a survey).
-            //     // Usually we consider this 'passed' or just 'completed'.
-            //     $status = 'passed';
-            // }
-
             // --- 3. Save ---
             $attempt->score        = $score;
             // $attempt->status       = $status; // Ensure you have this column in DB
             $attempt->total_marks = $attempt->assessment->total_marks ?? 1; // avoid div by zero
             $attempt->submitted_at = now();
             $attempt->save();
+
+
         });
+
+        // --- 4. Do on training ---
+        $user->student->training_status = Student::STATUS_IN_TRAINING;
+        $user->student->save();
 
         $attempt->load('assessment');
 

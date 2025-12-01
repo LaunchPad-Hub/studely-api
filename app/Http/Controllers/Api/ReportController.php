@@ -238,6 +238,7 @@ class ReportController extends Controller
                 'email' => $student->user->email,
                 'reg_no' => $student->reg_no,
                 'joined_at' => $student->created_at->format('M Y'),
+                'training_status' => $student->training_status
             ],
             'stats' => [
                 'avg_score' => round($myGlobalAvg),

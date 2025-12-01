@@ -31,6 +31,7 @@ class StudentResource extends JsonResource
             'current_semester'    => $this->current_semester,
             'tenant_id' => $this->tenant_id,
             'college_id' => $this->college_id,
+            'training_status' => $this->training_status,
             'created_at' => $this->created_at,
         ];
     }

@@ -26,6 +26,7 @@ return new class extends Migration
             $table->date('dob')->nullable();
             $table->year('admission_year')->nullable();
             $table->unsignedTinyInteger('current_semester')->nullable();
+            $table->string('training_status')->default('ready_for_baseline');
             $table->timestamps();
 
             $table->unique(['tenant_id','reg_no']);
