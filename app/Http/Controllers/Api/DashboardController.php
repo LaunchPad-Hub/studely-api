@@ -476,7 +476,7 @@ class DashboardController extends Controller
         }
 
         // 4. Compute stage + nextAction + activeModule.
-        $stage = $this->computeStage($baselineAttempt, $finalAttempt);
+        $stage = $this->computeStage($baselineAttempt, $finalAttempt, $student->training_status ?? null);
         $nextAction = $this->buildNextAction($stage);
         $activeModule = $this->buildActiveModuleSummary($stage, $baseline, $final, $baselineAttempt, $finalAttempt);
 
@@ -647,16 +647,22 @@ class DashboardController extends Controller
      * Compute programme stage for this student, based on baseline/final attempts.
      *
      * This is aligned with StudentStage in frontend:
-     * - baseline_not_started
+     * - ready_for_baseline
      * - baseline_in_progress
-     * - final_not_started
+     * - ready_for_final
      * - final_in_progress
      * - completed
      *
      * (You can later introduce "training" states when you track training.)
      */
-    protected function computeStage(?Attempt $baselineAttempt, ?Attempt $finalAttempt): string
+    protected function computeStage(?Attempt $baselineAttempt, ?Attempt $finalAttempt, ?string $trainingStatus = null): string
     {
+
+        // If the student is in training, override everything
+        if ($trainingStatus === 'in_training') {
+            return 'in_training';
+        }
+
         if (!$baselineAttempt) {
             return 'ready_for_baseline';
         }
