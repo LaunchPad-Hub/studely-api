@@ -156,7 +156,7 @@ class ReportController extends Controller
                     'total_attempts' => $s->total_attempts,
                     'avg_score' => round($avgPct),
                     'last_active' => $lastActive,
-                    'status' => $status,
+                    'performance_status' => $status,
                     'weakest_module' => null
                 ];
             });
