@@ -25,6 +25,8 @@ class StoreAssessmentRequest extends FormRequest
             'module_id' => ['required','integer','exists:modules,id'],
             'type' => ['required','in:MCQ,RUBRIC'],
             'title' => ['required','string'],
+            'order' => ['required','integer','min:0'],
+            // 'duration_minutes' => ['nullable','integer','min:0'],
             'instructions' => ['nullable','string'],
             'total_marks' => ['nullable','integer','min:0'],
             'is_active' => ['boolean'],

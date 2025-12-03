@@ -124,6 +124,7 @@ class DemoContentSeeder extends Seeder
             $assessmentDefs = [
                 [
                     'title'       => 'Baseline Assessment',
+                    'order'       => 1,
                     'type'        => 'online',
                     'instructions'=> 'This baseline assessment measures the student’s current level across multiple categories before any training. Complete all modules in order.',
                     'total_marks' => 100,
@@ -133,6 +134,7 @@ class DemoContentSeeder extends Seeder
                 ],
                 [
                     'title'       => 'Final Assessment',
+                    'order'       => 2,
                     'type'        => 'online',
                     'instructions'=> 'This final assessment compares performance after the training program. Complete all modules in order.',
                     'total_marks' => 100,

@@ -18,6 +18,7 @@ class AssessmentResource extends JsonResource
             'id'    => $this->id,
             'type'  => $this->type, // e.g 'online', 'offline'
             'title' => $this->title,
+            'order' => $this->order,
             'instructions' => $this->instructions,
             'total_marks'  => $this->total_marks,
             'is_active'    => $this->is_active,

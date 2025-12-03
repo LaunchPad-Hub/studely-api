@@ -29,9 +29,6 @@ class AssessmentController extends Controller
         $tid = app('tenant.id');
         $data = $req->validated();
 
-        // OLD: validating a module_id on Assessment (no longer exists)
-        // Module::where('tenant_id',$tid)->findOrFail($data['module_id']);
-
         // Create assessment only; modules will be created separately
         $a = Assessment::create($data + ['tenant_id' => $tid]);
 

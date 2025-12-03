@@ -23,6 +23,9 @@ class UpdateAssessmentRequest extends FormRequest
     {
         return [
             'title' => ['sometimes','string'],
+            'type' => ['sometimes','in:online,offline'],
+            'order' => ['sometimes','integer','min:0'],
+            // 'duration_minutes' => ['sometimes','nullable','integer','min:0'],
             'instructions' => ['sometimes','nullable','string'],
             'total_marks' => ['sometimes','integer','min:0'],
             'is_active' => ['sometimes','boolean'],

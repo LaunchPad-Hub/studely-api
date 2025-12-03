@@ -16,6 +16,7 @@ return new class extends Migration
             $table->foreignId('tenant_id')->constrained();
             $table->enum('type',['MCQ','RUBRIC', 'online', 'offline'])->default('MCQ');
             $table->string('title');
+            $table->integer('order')->default(0);
             $table->text('instructions')->nullable();
             $table->integer('total_marks')->default(0);
             $table->boolean('is_active')->default(true);
