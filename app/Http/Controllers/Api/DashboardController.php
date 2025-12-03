@@ -658,7 +658,7 @@ class DashboardController extends Controller
     protected function computeStage(?Attempt $baselineAttempt, ?Attempt $finalAttempt): string
     {
         if (!$baselineAttempt) {
-            return 'baseline_not_started';
+            return 'ready_for_baseline';
         }
 
         if ($baselineAttempt && !$baselineAttempt->submitted_at) {
@@ -666,7 +666,7 @@ class DashboardController extends Controller
         }
 
         if ($baselineAttempt && $baselineAttempt->submitted_at && !$finalAttempt) {
-            return 'final_not_started';
+            return 'ready_for_final';
         }
 
         if ($finalAttempt && !$finalAttempt->submitted_at) {
