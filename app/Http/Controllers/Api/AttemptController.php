@@ -13,188 +13,141 @@ use Illuminate\Support\Facades\DB;
 class AttemptController extends Controller
 {
     /**
-     * OLD: explicit start by assessment id
-     * POST /v1/assessments/{id}/attempts
-     *
-     * (kept for admin / direct links)
+     * Helper to get the specific IDs for the workflow based on ORDER.
+     * 1st Assessment (lowest order) = Baseline
+     * 2nd Assessment (next order)   = Final
      */
-    public function start(Request $r, $assessmentId)
+    private function getWorkflowIds($tenantId)
     {
-        $user = $r->user(); // same as Auth::user(), cleaner
-        if (!$user) {
-            abort(401, 'Unauthenticated');
-        }
+        $assessments = Assessment::where('tenant_id', $tenantId)
+            ->orderBy('order', 'asc') // <--- UPDATED: Rely on 'order' column
+            ->orderBy('id', 'asc')    // Fallback for tie-breaking
+            ->limit(2)
+            ->pluck('id');
 
-        $tid     = $user->tenant_id;
-        $student = $user->student;
-
-        if (!$student) {
-            abort(403, 'Only students can start attempts');
-        }
-
-        // Load assessment with modules + questions + options for the engine
-        $assessment = Assessment::where('tenant_id', $tid)
-            ->with([
-                'modules' => function ($q) {
-                    $q->orderBy('order');
-                },
-                'modules.questions.options',
-            ])
-            ->findOrFail($assessmentId);
-
-        // Single attempt per (tenant, assessment, student)
-        $attempt = Attempt::firstOrCreate(
-            [
-                'tenant_id'     => $tid,
-                'assessment_id' => $assessment->id,
-                'student_id'    => $student->id,
-            ],
-            [
-                'started_at' => now(),
-            ]
-        );
-
-        $attempt->load([
-            'assessment.modules.questions.options',
-            'responses',
-        ]);
-
-        return new AttemptResource($attempt);
+        return [
+            'baseline_id' => $assessments[0] ?? null,
+            'final_id'    => $assessments[1] ?? null,
+        ];
     }
 
     /**
-     * NEW: start "the right" assessment for this student.
-     *
+     * POST /v1/assessments/{id}/attempts
+     * (Kept for admin/direct links)
+     */
+    public function start(Request $r, $assessmentId)
+    {
+        $user = $r->user();
+        if (!$user || !$user->student) abort(403, 'Unauthorized');
+
+        return $this->createAttempt($user->tenant_id, $user->student->id, $assessmentId);
+    }
+
+    /**
      * POST /v1/assessment/attempt
-     *
-     * Uses Baseline/Final + programme stage:
-     * - if baseline not started → baseline
-     * - if baseline in progress → baseline
-     * - if baseline done & final not started → final
-     * - if final in progress → final
-     * - if everything done → 409 "Programme already completed"
+     * * INTELLIGENT WORKFLOW START
+     * Determines which assessment to start based on Student Training Status + Assessment Order.
      */
     public function startCurrent(Request $r)
     {
         $user = $r->user();
-        if (!$user) {
-            abort(401, 'Unauthenticated');
-        }
+        if (!$user || !$user->student) abort(403, 'Unauthorized');
 
-        $tid     = $user->tenant_id;
         $student = $user->student;
+        $tenantId = $user->tenant_id;
 
-        if (!$student) {
-            abort(403, 'Only students can start attempts');
-        }
+        // Fetch IDs based on the defined order
+        ['baseline_id' => $baselineId, 'final_id' => $finalId] = $this->getWorkflowIds($tenantId);
 
-        // Load all assessments for this tenant
-        $assessments = Assessment::where('tenant_id', $tid)
-            ->with([
-                'modules' => function ($q) {
-                    $q->orderBy('order');
-                },
-                'modules.questions.options',
-            ])
-            ->orderBy('id')
-            ->get();
+        if (!$baselineId) abort(404, 'No assessments configured.');
 
-        if ($assessments->isEmpty()) {
-            abort(404, 'No assessments configured for this tenant');
-        }
+        $targetAssessmentId = null;
+        $newStatus = null;
 
-        // Identify Baseline & Final (by title, fallback to order)
-        $baseline = $assessments->firstWhere('title', 'like', '%Baseline%')
-            ?? $assessments->first();
-        $final = $assessments->firstWhere('title', 'like', '%Final%')
-            ?? ($assessments->count() > 1 ? $assessments->get(1) : null);
-
-        // Load existing attempts for this student
-        $attempts = Attempt::where('tenant_id', $tid)
-            ->where('student_id', $student->id)
-            ->get()
-            ->keyBy('assessment_id');
-
-        $baselineAttempt = $baseline ? $attempts->get($baseline->id) : null;
-        $finalAttempt    = $final ? $attempts->get($final->id)    : null;
-
-        // Compute stage (same as dashboard)
-        $stage = $this->computeStage($baselineAttempt, $finalAttempt);
-
-        // Decide which assessment is "current"
-        $assessment = null;
-        switch ($stage) {
-            case 'baseline_not_started':
-            case 'baseline_in_progress':
-                $assessment = $baseline;
+        // --- Workflow State Machine ---
+        switch ($student->training_status) {
+            // 1. Start Baseline (First Attempt)
+            case Student::STATUS_READY_BASELINE:
+                $targetAssessmentId = $baselineId;
+                $newStatus = Student::BASELINE_IN_PROGRESS;
                 break;
-            case 'final_not_started':
-            case 'final_in_progress':
-                $assessment = $final;
+
+            // 2. Resume Baseline
+            case Student::BASELINE_IN_PROGRESS:
+                $targetAssessmentId = $baselineId;
+                // Status remains same
                 break;
-            case 'completed':
-                abort(409, 'Programme already completed.');
+
+            // 3. Start Final
+            case Student::STATUS_READY_FINAL:
+                if (!$finalId) abort(404, 'Final assessment not configured yet.');
+                $targetAssessmentId = $finalId;
+                $newStatus = Student::FINAL_IN_PROGRESS;
+                break;
+
+            // 4. Resume Final
+            case Student::FINAL_IN_PROGRESS:
+                if (!$finalId) abort(404, 'Final assessment not configured yet.');
+                $targetAssessmentId = $finalId;
+                // Status remains same
+                break;
+
+            // Edge Cases
+            case Student::STATUS_IN_TRAINING:
+                abort(403, 'You are currently in training. Please wait for approval to take the Final Assessment.');
+
+            case Student::STATUS_COMPLETED:
+                // Optional: Allow them to view results, but strictly speaking, they can't "start" a new attempt.
+                abort(409, 'You have completed the programme.');
+
             default:
-                $assessment = $baseline ?? $assessments->first();
+                // Fallback for fresh students (null status) -> Treat as Ready for Baseline
+                $targetAssessmentId = $baselineId;
+                $newStatus = Student::BASELINE_IN_PROGRESS;
+                break;
         }
 
-        if (!$assessment) {
-            abort(404, 'No assessment available for your stage.');
+        // --- Update Status if changing ---
+        if ($newStatus && $student->training_status !== $newStatus) {
+            $student->training_status = $newStatus;
+            $student->save();
         }
 
-        // Single attempt per assessment & student
+        return $this->createAttempt($tenantId, $student->id, $targetAssessmentId);
+    }
+
+    /**
+     * Shared logic to create or retrieve the active attempt
+     */
+    private function createAttempt($tenantId, $studentId, $assessmentId)
+    {
+        // Ensure assessment exists within tenant
+        $assessment = Assessment::where('tenant_id', $tenantId)
+            ->with(['modules.questions.options'])
+            ->findOrFail($assessmentId);
+
+        // Fetch existing attempt or create new one
         $attempt = Attempt::firstOrCreate(
             [
-                'tenant_id'     => $tid,
-                'assessment_id' => $assessment->id,
-                'student_id'    => $student->id,
+                'tenant_id'     => $tenantId,
+                'assessment_id' => $assessmentId,
+                'student_id'    => $studentId,
             ],
             [
                 'started_at' => now(),
             ]
         );
 
-        $attempt->load([
-            'assessment.modules.questions.options',
-            'responses',
-        ]);
+        $attempt->load(['assessment.modules.questions.options', 'responses']);
 
         return new AttemptResource($attempt);
-    }
-
-    /**
-     * Shared stage logic (same idea as in DashboardController).
-     */
-    protected function computeStage(?Attempt $baselineAttempt, ?Attempt $finalAttempt): string
-    {
-        if (!$baselineAttempt) {
-            return 'baseline_not_started';
-        }
-
-        if ($baselineAttempt && !$baselineAttempt->submitted_at) {
-            return 'baseline_in_progress';
-        }
-
-        if ($baselineAttempt && $baselineAttempt->submitted_at && !$finalAttempt) {
-            return 'final_not_started';
-        }
-
-        if ($finalAttempt && !$finalAttempt->submitted_at) {
-            return 'final_in_progress';
-        }
-
-        return 'completed';
     }
 
     public function saveProgress(SaveProgressRequest $req, $attemptId)
     {
         $tid  = app('tenant.id');
         $data = $req->validated();
-
         $user = $req->user();
-        if (!$user) {
-            abort(401, 'Unauthenticated');
-        }
 
         $attempt = Attempt::where('tenant_id', $tid)->findOrFail($attemptId);
 
@@ -202,23 +155,11 @@ class AttemptController extends Controller
             abort(403, 'You cannot modify this attempt');
         }
 
-        $q = Question::where('tenant_id', $tid)
-            ->with('module')
-            ->findOrFail($data['question_id']);
-
-        if (!$q->module || $q->module->assessment_id !== $attempt->assessment_id) {
-            abort(403, 'Question does not belong to this assessment');
-        }
+        $q = Question::where('tenant_id', $tid)->findOrFail($data['question_id']);
 
         Response::updateOrCreate(
-            [
-                'attempt_id'  => $attempt->id,
-                'question_id' => $q->id,
-            ],
-            [
-                'option_id'   => $data['option_id'] ?? null,
-                'text_answer' => $data['text_answer'] ?? null,
-            ]
+            ['attempt_id' => $attempt->id, 'question_id' => $q->id],
+            ['option_id' => $data['option_id'] ?? null, 'text_answer' => $data['text_answer'] ?? null]
         );
 
         return response()->json(['message' => 'saved']);
@@ -229,26 +170,23 @@ class AttemptController extends Controller
         $tid  = app('tenant.id');
         $user = User::with('student')->find(Auth::id());
 
-        if (!$user) {
-            abort(401, 'Unauthenticated');
-        }
+        if (!$user || !$user->student) abort(401, 'Unauthenticated');
 
         $attempt = Attempt::where('tenant_id', $tid)
-            ->with([
-                'responses.option',
-                'responses.question.options',
-                'assessment', // Ensure this is loaded to access total_mark & passing_percentage
-            ])
+            ->with(['responses.option', 'responses.question.options', 'assessment'])
             ->findOrFail($attemptId);
 
-        if ($user->student && $attempt->student_id !== $user->student->id) {
+        if ($attempt->student_id !== $user->student->id) {
             abort(403, 'You cannot submit this attempt');
         }
 
-        DB::transaction(function () use ($attempt) {
+        // Identify which assessment this is in the workflow
+        ['baseline_id' => $baselineId, 'final_id' => $finalId] = $this->getWorkflowIds($tid);
+
+        DB::transaction(function () use ($attempt, $user, $baselineId, $finalId) {
             $score = 0;
 
-            // --- 1. Calculate Score ---
+            // 1. Scoring Logic
             foreach ($attempt->responses as $resp) {
                 $q = $resp->question;
                 if (!$q) continue;
@@ -256,46 +194,43 @@ class AttemptController extends Controller
                 $points = $q->points ?? 0;
                 $isCorrect = false;
 
-                switch ($q->type) {
-                    case 'MCQ':
-                    case 'BOOLEAN':
-                        if ($resp->option && $resp->option->is_correct) {
+                if ($q->type === 'MCQ' || $q->type === 'BOOLEAN') {
+                    if ($resp->option && $resp->option->is_correct) $isCorrect = true;
+                } elseif ($q->type === 'TEXT') {
+                    if ($resp->text_answer) {
+                        $correctOption = $q->options->where('is_correct', true)->first();
+                        if ($correctOption && trim(strtolower($resp->text_answer)) === trim(strtolower($correctOption->text))) {
                             $isCorrect = true;
                         }
-                        break;
-                    case 'TEXT':
-                        if ($resp->text_answer) {
-                            $correctOption = $q->options->where('is_correct', true)->first();
-                            if ($correctOption) {
-                                $userAns = trim(strtolower($resp->text_answer));
-                                $correctAns = trim(strtolower($correctOption->text));
-                                if ($userAns === $correctAns) $isCorrect = true;
-                            }
-                        }
-                        break;
+                    }
                 }
 
-                if ($isCorrect) {
-                    $score += $points;
-                }
+                if ($isCorrect) $score += $points;
             }
 
-            // --- 3. Save ---
-            $attempt->score        = $score;
-            // $attempt->status       = $status; // Ensure you have this column in DB
-            $attempt->total_marks = $attempt->assessment->total_marks ?? 1; // avoid div by zero
+            // 2. Save Attempt
+            $attempt->score = $score;
+            $attempt->total_marks = $attempt->assessment->total_marks ?? 1;
             $attempt->submitted_at = now();
             $attempt->save();
 
+            // 3. WORKFLOW STATE UPDATE
+            // Move to next stage based on which assessment was just finished
 
+            if ($attempt->assessment_id == $baselineId) {
+                // Finished Baseline -> Move to In Training
+                $user->student->update([
+                    'training_status' => Student::STATUS_IN_TRAINING
+                ]);
+            }
+            elseif ($attempt->assessment_id == $finalId) {
+                // Finished Final -> Move to Completed
+                $user->student->update([
+                    'training_status' => Student::STATUS_COMPLETED
+                ]);
+            }
         });
 
-        // --- 4. Do on training ---
-        $user->student->training_status = Student::STATUS_IN_TRAINING;
-        $user->student->save();
-
-        $attempt->load('assessment');
-
-        return new AttemptResource($attempt);
+        return new AttemptResource($attempt->load('assessment'));
     }
 }

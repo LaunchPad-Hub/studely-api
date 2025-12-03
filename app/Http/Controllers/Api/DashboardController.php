@@ -16,24 +16,13 @@ use App\Models\{
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
 
     /**
      * Admin dashboard endpoint.
-     *
-     * GET /v1/dashboard/admin?timeframe=today|7d|30d
-     *
-     * Returns a JSON payload matching AdminDashboardDTO (TS: DashboardData without icons):
-     * - tenants: list of colleges for this tenant (for filter dropdown)
-     * - kpis: high-level metrics (numbers only; icons handled on frontend)
-     * - trend: simple sparkline data (submissions over time)
-     * - upcoming: upcoming modules/assessments
-     * - recent: recent submissions with score + college
-     * - distribution: global score distribution buckets
-     * - distributionByTenant: per-college score buckets
-     * - progressByCollege: A1/A2 completion per college
      */
     public function admin(Request $request)
     {
@@ -86,7 +75,6 @@ class DashboardController extends Controller
                 'due'        => optional($m->end_at)->format('M j'),
                 'count'      => $participantCount,
                 'status'     => $m->start_at && $m->start_at->isFuture() ? 'Scheduled' : 'Open',
-                // NOTE: upcoming items are not college-specific, so leave tenantId/tenantName null.
                 'tenantId'   => null,
                 'tenantName' => null,
             ];
@@ -149,7 +137,8 @@ class DashboardController extends Controller
             $college = $student ? $student->college : null;
 
             $recent[] = [
-                'studentId'  => (string) $student->id,
+                'studentId'  => (string) $student->id, // Normalized to camelCase for frontend consistency if needed
+                'student_id' => $student->id,          // Providing snake_case for the link
                 'student'    => $studentName,
                 'module'     => $assessment->title,
                 'score'      => $avgScore,
@@ -406,17 +395,6 @@ class DashboardController extends Controller
 
     /**
      * Student dashboard endpoint.
-     *
-     * GET /v1/dashboard/student
-     *
-     * Returns a JSON payload matching StudentDashboardDTO:
-     * - stage: current programme stage for this student
-     * - nextAction: CTA shown on dashboard (button label + status + href)
-     * - activeModule: the module the engine should open next
-     * - assessments: baseline + final with per-module status & score
-     * - comparisons: baseline vs final per module
-     * - aggregateScore: overall percentage across modules
-     * - myQueue: submitted & upcoming modules for this student
      */
     public function student(Request $request)
     {
@@ -430,8 +408,6 @@ class DashboardController extends Controller
         }
 
         // 1. Load assessments for this tenant.
-        // For now we assume there are exactly two: Baseline + Final.
-        // You can refine filters (e.g. by programme) later.
         $assessments = Assessment::where('tenant_id', $tenantId)
             ->with([
                 'modules' => function ($q) {
@@ -442,7 +418,7 @@ class DashboardController extends Controller
             ->orderBy('id')
             ->get();
 
-        // Try to identify baseline & final.
+        // Identify baseline & final.
         $baseline = $assessments->firstWhere('title', 'like', '%Baseline%')
             ?? $assessments->first();
         $final = $assessments->firstWhere('title', 'like', '%Final%')
@@ -464,7 +440,7 @@ class DashboardController extends Controller
 
         // 3. Build per-assessment summaries (StudentAssessment[]).
         $assessmentPayloads = [];
-        $moduleScoresByAssessment = []; // for comparisons + aggregate
+        $moduleScoresByAssessment = []; // for comparisons
 
         foreach ($assessments as $assessment) {
             $attempt = $attempts->get($assessment->id);
@@ -497,29 +473,37 @@ class DashboardController extends Controller
             }
         }
 
-        // 6. Aggregate score across all modules (both assessments).
-        $allScores = collect($moduleScoresByAssessment)
-            ->flatMap(function ($modules) {
-                return collect($modules)->pluck('score')->filter(fn ($v) => $v !== null);
-            })
-            ->values();
+        // 6. Aggregate score matching ReportController logic (Avg of Attempt Percentages)
+        // We look at all submitted attempts in $attempts collection.
+        $submittedAttempts = $attempts->filter(fn($a) => $a->submitted_at !== null);
 
-        $aggregateScore = $allScores->count()
-            ? round($allScores->avg())
-            : null;
+        if ($submittedAttempts->isEmpty()) {
+            $aggregateScore = null;
+        } else {
+            // Calculate percentage for each attempt independently
+            $avgPct = $submittedAttempts->avg(function ($attempt) {
+                // Use total_marks from attempt table (snapshot) or fallback to assessment config
+                $total = $attempt->total_marks > 0
+                    ? $attempt->total_marks
+                    : ($attempt->assessment->total_marks > 0 ? $attempt->assessment->total_marks : 1);
+
+                return ($attempt->score / $total) * 100;
+            });
+            $aggregateScore = round($avgPct);
+        }
 
         // 7. Submitted + upcoming queue for this student.
         $queue = $this->buildMyQueue($baseline, $final, $baselineAttempt, $finalAttempt, $moduleScoresByAssessment, $stage);
 
         // 8. Final payload.
         $payload = [
-            'stage'         => $stage,
-            'nextAction'    => $nextAction,
-            'activeModule'  => $activeModule,
-            'assessments'   => $assessmentPayloads,
-            'comparisons'   => $comparisons,
-            'aggregateScore'=> $aggregateScore,
-            'myQueue'       => $queue,
+            'stage'          => $stage,
+            'nextAction'     => $nextAction,
+            'activeModule'   => $activeModule,
+            'assessments'    => $assessmentPayloads,
+            'comparisons'    => $comparisons,
+            'aggregateScore' => $aggregateScore,
+            'myQueue'        => $queue,
         ];
 
         return response()->json(['data' => $payload]);
@@ -527,17 +511,6 @@ class DashboardController extends Controller
 
     /**
      * Build a StudentAssessment payload from an Assessment + optional Attempt.
-     *
-     * Shape:
-     * {
-     *   id: number,
-     *   title: string,
-     *   availability: "open" | "scheduled" | "not_due",
-     *   due_at: string|null,
-     *   modules: [
-     *     { number, title, status: "Complete"|"Incomplete", score, due_at }
-     *   ]
-     * }
      */
     protected function buildStudentAssessment(Assessment $assessment, ?Attempt $attempt): array
     {
@@ -566,15 +539,6 @@ class DashboardController extends Controller
 
     /**
      * Build a StudentModule payload for a given Module & Attempt.
-     *
-     * Shape:
-     * {
-     *   number: int,
-     *   title: string,
-     *   status: "Complete"|"Incomplete",
-     *   score: int|null,
-     *   due_at: string|null
-     * }
      */
     protected function buildStudentModule(Module $module, ?Attempt $attempt): array
     {
@@ -600,10 +564,6 @@ class DashboardController extends Controller
 
     /**
      * Compute percentage score for a given module inside a given attempt.
-     *
-     * For now:
-     * - MCQ: +1 for each correct response (option.is_correct)
-     * - Essay / others: ignored in auto-score (kept for evaluator).
      */
     protected function computeModuleScore(Module $module, Attempt $attempt): ?int
     {
@@ -645,15 +605,6 @@ class DashboardController extends Controller
 
     /**
      * Compute programme stage for this student, based on baseline/final attempts.
-     *
-     * This is aligned with StudentStage in frontend:
-     * - ready_for_baseline
-     * - baseline_in_progress
-     * - ready_for_final
-     * - final_in_progress
-     * - completed
-     *
-     * (You can later introduce "training" states when you track training.)
      */
     protected function computeStage(?Attempt $baselineAttempt, ?Attempt $finalAttempt, ?string $trainingStatus = null): string
     {
@@ -684,14 +635,6 @@ class DashboardController extends Controller
 
     /**
      * Build nextAction object (primary CTA on student dashboard).
-     *
-     * Shape:
-     * {
-     *   label: string,
-     *   status: "ready"|"locked"|"completed",
-     *   helper?: string,
-     *   href?: string
-     * }
      */
     protected function buildNextAction(string $stage): array
     {
@@ -745,18 +688,6 @@ class DashboardController extends Controller
 
     /**
      * Build activeModule summary used by the dashboard "Current module" card.
-     *
-     * Shape:
-     * {
-     *   assessmentId,
-     *   assessmentTitle,
-     *   moduleNumber,
-     *   moduleTitle,
-     *   totalModules,
-     *   status: "not_started"|"in_progress"|"completed",
-     *   time_limit_min?: int|null,
-     *   time_left_sec?: int|null   // optional, can be null for now
-     * }
      */
     protected function buildActiveModuleSummary(
         string $stage,
@@ -821,12 +752,6 @@ class DashboardController extends Controller
 
     /**
      * Build myQueue (submitted & upcoming) for the student.
-     *
-     * Shape:
-     * {
-     *   submitted: [{ title, when, score }],
-     *   upcoming:  [{ title, due_at }]
-     * }
      */
     protected function buildMyQueue(
         ?Assessment $baseline,

@@ -9,8 +9,10 @@ class Student extends Model
 {
     use HasFactory;
     const STATUS_READY_BASELINE = 'ready_for_baseline';
+    const BASELINE_IN_PROGRESS = 'baseline_in_progress';
     const STATUS_IN_TRAINING    = 'in_training';
     const STATUS_READY_FINAL    = 'ready_for_final';
+    const FINAL_IN_PROGRESS    = 'final_in_progress';
     const STATUS_COMPLETED      = 'completed';
 
     protected $fillable = ['tenant_id','user_id', 'college_id','reg_no','branch','cohort','meta', 'institution_name', 'university_name', 'gender', 'dob', 'admission_year', 'current_semester', 'training_status'];
