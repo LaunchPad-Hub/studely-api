@@ -149,6 +149,7 @@ class DashboardController extends Controller
             $college = $student ? $student->college : null;
 
             $recent[] = [
+                'studentId'  => (string) $student->id,
                 'student'    => $studentName,
                 'module'     => $assessment->title,
                 'score'      => $avgScore,
