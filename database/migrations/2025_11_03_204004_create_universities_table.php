@@ -11,17 +11,16 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('colleges', function (Blueprint $table) {
+        Schema::create('universities', function (Blueprint $table) {
             $table->id();
             $table->foreignId('tenant_id')->constrained();
-            $table->foreignId('university_id')->constrained();
             $table->string('name');
             $table->string('code')->nullable();
-            $table->string('management')->nullable();
             $table->string('state')->nullable();
             $table->string('district')->nullable();
             $table->enum('location', ['urban', 'rural'])->default('urban');
-            $table->text('description')->nullable();
+            $table->string('website')->nullable();
+            $table->year('established_year')->nullable();
             $table->timestamps();
         });
     }
@@ -31,6 +30,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('colleges');
+        Schema::dropIfExists('universities');
     }
 };

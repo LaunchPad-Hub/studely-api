@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\{
   AttemptController, CollegeController, DashboardController, EvaluationController, ReportController,
     RubricController
 };
+use App\Http\ControllersApi\UniversityController;
 use App\Http\Middleware\ScopeTenant;
 
 Route::prefix('v1')->group(function () {
@@ -34,6 +35,9 @@ Route::prefix('v1')->group(function () {
 
         // Colleges
         Route::apiResource('colleges', CollegeController::class);
+
+        // Universities
+        Route::apiResource('universities', UniversityController::class);
 
         // Students
         Route::get('students', [StudentController::class, 'index']);

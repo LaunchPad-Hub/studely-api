@@ -10,12 +10,16 @@ class College extends Model
     use HasFactory;
 
     protected $fillable = [
-        'tenant_id', 'name', 'code', 'location', 'description'
+        'tenant_id', 'name', 'code', 'university_id', 'state', 'district', 'management', 'location', 'description'
     ];
 
     public function tenant()
     {
         return $this->belongsTo(Tenant::class);
+    }
+
+    public function university(){
+         return $this->belongsTo(College::class);
     }
 
     public function students()

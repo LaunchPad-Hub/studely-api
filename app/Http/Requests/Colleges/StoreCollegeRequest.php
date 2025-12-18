@@ -24,6 +24,8 @@ class StoreCollegeRequest extends FormRequest
         return [
             'name'        => ['required', 'string', 'max:255'],
             'code'        => ['nullable', 'string', 'max:50'],
+            'state'       => ['nullable', 'string', 'max:255'],
+            'district'    => ['nullable', 'string', 'max:255'],
             'location'    => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'meta'        => ['nullable', 'array'],

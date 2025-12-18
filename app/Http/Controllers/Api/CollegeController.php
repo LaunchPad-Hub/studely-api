@@ -34,8 +34,11 @@ class CollegeController extends Controller
 
         $college = College::create([
             'tenant_id'   => $tid,
+            'university_id' => $data['university_id'],
             'name'        => $data['name'],
             'code'        => $data['code'] ?? null,
+            'state'       => $data['state'] ?? null,
+            'district'    => $data['district'] ?? null,
             'location'    => $data['location'] ?? null,
             'description' => $data['description'] ?? null,
             'meta'        => $data['meta'] ?? null,
