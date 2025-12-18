@@ -1,14 +1,17 @@
 <?php
 
-namespace App\Http\ControllersApi;
+namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Universities\StoreUniversityRequest;
 use App\Http\Requests\Universities\UpdateUniversityRequest;
 use App\Http\Resources\UniversityResource;
+use App\Imports\UniversitiesImport;
 use App\Models\University;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Excel;
 
 class UniversityController extends Controller
 {
@@ -71,5 +74,25 @@ class UniversityController extends Controller
         $college->delete();
 
         return response()->json(['message' => 'deleted']);
+    }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:10240', // Max 10MB
+        ]);
+
+        $tid = Auth::user()?->tenant_id;
+
+        // We pass the tenant_id to the Import class if needed,
+        // or ensure the Import class handles authentication context.
+        try {
+            Excel::import(new UniversitiesImport(), $request->file('file'));
+            return response()->json(['message' => 'Universities imported successfully.']);
+        } catch (\Exception $e) {
+            // Log the error for debugging
+            Log::error('Import failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Import failed. Check your file format.'], 422);
+        }
     }
 }

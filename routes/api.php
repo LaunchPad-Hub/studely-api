@@ -3,11 +3,10 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{
   AuthController, OtpController, TenantController, StudentController, StudentImportController,
-  ModuleController, AssessmentController, QuestionController, QuestionOptionController,
+  ModuleController, UniversityController, AssessmentController, QuestionController, QuestionOptionController,
   AttemptController, CollegeController, DashboardController, EvaluationController, ReportController,
     RubricController
 };
-use App\Http\ControllersApi\UniversityController;
 use App\Http\Middleware\ScopeTenant;
 
 Route::prefix('v1')->group(function () {
@@ -37,6 +36,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('colleges', CollegeController::class);
 
         // Universities
+        Route::post('universities/import', [UniversityController::class, 'import']);
         Route::apiResource('universities', UniversityController::class);
 
         // Students
