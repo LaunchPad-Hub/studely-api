@@ -5,7 +5,8 @@ namespace App\Imports;
 use App\Models\University;
 use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Concerns\ToModel;
-class UniversitiesImport implements ToModel
+use Maatwebsite\Excel\Concerns\WithHeadingRow;
+class UniversitiesImport implements ToModel, WithHeadingRow
 {
     /**
     * @param array $row
