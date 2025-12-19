@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Colleges\StoreCollegeRequest;
 use App\Http\Requests\Colleges\UpdateCollegeRequest;
 use App\Http\Resources\CollegeResource;
+use App\Imports\CollegesImport;
 use App\Models\College;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Facades\Excel;
 
 class CollegeController extends Controller
 {
@@ -71,5 +74,20 @@ class CollegeController extends Controller
         $college->delete();
 
         return response()->json(['message' => 'deleted']);
+    }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:10240',
+        ]);
+
+        try {
+            Excel::import(new CollegesImport, $request->file('file'));
+            return response()->json(['message' => 'Colleges imported successfully.']);
+        } catch (\Exception $e) {
+            Log::error('College Import failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Import failed. Check format and University Codes.'], 422);
+        }
     }
 }

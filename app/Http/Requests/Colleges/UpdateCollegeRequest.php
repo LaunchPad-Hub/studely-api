@@ -22,6 +22,7 @@ class UpdateCollegeRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'university_id' => ['sometimes', 'required', 'exists:universities,id'],
             'name'        => ['sometimes', 'required', 'string', 'max:255'],
             'code'        => ['sometimes', 'nullable', 'string', 'max:50'],
             'location'    => ['sometimes', 'nullable', 'string', 'max:255'],

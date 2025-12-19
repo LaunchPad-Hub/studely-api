@@ -33,6 +33,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('tenants', TenantController::class)->middleware('role:SuperAdmin');
 
         // Colleges
+        Route::post('colleges/import', [CollegeController::class, 'import']);
         Route::apiResource('colleges', CollegeController::class);
 
         // Universities

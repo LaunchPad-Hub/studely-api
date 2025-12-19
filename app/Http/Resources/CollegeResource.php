@@ -16,6 +16,10 @@ class CollegeResource extends JsonResource
     {
         return [
             'id'          => $this->id,
+            'tenant_id'   => $this->tenant_id,
+            'university'       => $this->whenLoaded('university', function () {
+                return new UniversityResource($this->university);
+            }),
             'name'        => $this->name,
             'code'        => $this->code,
             'state'       => $this->state,

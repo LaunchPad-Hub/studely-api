@@ -19,7 +19,7 @@ class College extends Model
     }
 
     public function university(){
-         return $this->belongsTo(College::class);
+         return $this->belongsTo(University::class);
     }
 
     public function students()

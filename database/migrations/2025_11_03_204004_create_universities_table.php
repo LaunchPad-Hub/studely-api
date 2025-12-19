@@ -18,9 +18,9 @@ return new class extends Migration
             $table->string('code')->nullable();
             $table->string('state')->nullable();
             $table->string('district')->nullable();
-            $table->enum('location', ['urban', 'rural'])->default('urban');
+            $table->string('location')->default('urban');
             $table->string('website')->nullable();
-            $table->year('established_year')->nullable();
+            $table->smallInteger('established_year')->nullable();
             $table->timestamps();
         });
     }
