@@ -17,15 +17,6 @@ class DemoContentSeeder extends Seeder
         DB::transaction(function () {
             // --- Tiny inline helpers (no Faker) ---
             $pick = fn(array $arr) => $arr[array_rand($arr)];
-            $num  = fn(int $min, int $max) => random_int($min, $max);
-            $digits = function (int $len) {
-                $s = '';
-                for ($i = 0; $i < $len; $i++) $s .= (string) random_int(0, 9);
-                return $s;
-            };
-
-            $branches = ['Computer Science', 'Electronics', 'Business', 'Communication'];
-            $cities   = ['Pune', 'Bangalore', 'Hyderabad', 'Mumbai', 'Delhi', 'Ahmedabad', 'Jaipur', 'Kolkata', 'Chennai'];
 
             // --- Tenant ---
             $tenant = Tenant::firstOrCreate(
@@ -33,87 +24,12 @@ class DemoContentSeeder extends Seeder
                 ['name' => 'TechNirma Institute of Technology']
             );
 
-            // --- Colleges ---
-            $colleges = collect([
-                ['name' => 'TechNirma College of Engineering',     'code' => 'ENG', 'location' => 'Pune',      'description' => 'Focuses on engineering and applied sciences.'],
-                ['name' => 'Arya College of Management Studies',   'code' => 'MGT', 'location' => 'Bangalore', 'description' => 'Renowned for its business and management programs.'],
-                ['name' => 'Nirma Institute of Computer Science',  'code' => 'CSE', 'location' => 'Hyderabad', 'description' => 'Specializes in software engineering and computing.'],
-                ['name' => 'Vidya College of Communication',       'code' => 'COM', 'location' => 'Mumbai',    'description' => 'Dedicated to soft skills and public communication.'],
-            ])->map(fn($data) => College::firstOrCreate(
-                ['tenant_id' => $tenant->id, 'code' => $data['code']],
-                $data
-            ));
-
-            // --- Admin user ---
-            $admin = User::firstOrCreate(
-                ['email' => 'admin@technirma.in'],
-                [
-                    'name'              => 'Institute Admin',
-                    'tenant_id'         => $tenant->id,
-                    'college_id'         => $colleges->random()->id,
-                    'password'          => Hash::make('Password!234'),
-                    'email_verified_at' => now(),
-                    'registered_at'     => now(),
-                ]
-            );
-            if (method_exists($admin, 'assignRole')) {
-                $admin->assignRole('CollegeAdmin');
-            }
-
             // --- Students ---
             $studentNames = [
                 'Aarav Sharma', 'Diya Patel', 'Ishaan Mehta', 'Priya Nair', 'Rohan Iyer',
                 'Ananya Reddy', 'Karan Gupta', 'Sneha Raj', 'Devansh Das', 'Meera Singh',
                 'Kabir Bansal', 'Ritika Chopra', 'Aditi Pillai', 'Rahul Menon', 'Simran Deshmukh',
             ];
-
-            foreach ($studentNames as $i => $name) {
-                $email = strtolower(Str::slug($name, '.')) . '@technirma.in';
-
-                $studentUser = User::firstOrCreate(
-                    ['email' => $email],
-                    [
-                        'name'              => $name,
-                        'password'          => Hash::make('Password!234'),
-                        'tenant_id'         => $tenant->id,
-                        'email_verified_at' => now(),
-                        'registered_at'     => now(),
-                    ]
-                );
-
-                if (method_exists($studentUser, 'assignRole')) {
-                    $studentUser->assignRole('Student');
-                }
-
-                $college = $colleges->random();
-
-                $dob = now()
-                    ->clone()
-                    ->subYears($num(19, 22))
-                    ->subMonths($num(1, 11))
-                    ->subDays($num(0, 27));
-
-                Student::firstOrCreate(
-                    [
-                        'tenant_id' => $tenant->id,
-                        'user_id'   => $studentUser->id,
-                    ],
-                    [
-                        'college_id'        => $college->id,
-                        'reg_no'            => 'TN-' . str_pad($i + 1, 3, '0', STR_PAD_LEFT),
-                        'branch'            => $pick($branches),
-                        'cohort'            => '2025',
-                        'gender'            => $i % 2 === 0 ? 'Male' : 'Female',
-                        'dob'               => $dob,
-                        'admission_year'    => 2022,
-                        'current_semester'  => $num(4, 6),
-                        'meta'              => [
-                            'phone'   => '+91' . $digits(10),
-                            'address' => $pick($cities),
-                        ],
-                    ]
-                );
-            }
 
             /* -----------------------------------------------------------------
              |  ASSESSMENTS + MODULES + QUESTIONS

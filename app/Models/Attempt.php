@@ -15,7 +15,8 @@ class Attempt extends Model
     protected $casts = [
         'started_at'=>'datetime',
         'submitted_at'=>'datetime',
-        'score'=>'decimal:2'
+        'score'=>'decimal:2',
+        'meta' => 'array',
     ];
 
     public function assessment(){

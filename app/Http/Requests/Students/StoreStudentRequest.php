@@ -22,10 +22,13 @@ class StoreStudentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'reg_no' => ['required','string'],
+            'reg_no' => ['nullable','string'],
+            'university_id' => ['required','exists:universities,id'],
+            'college_id' => ['required','exists:colleges,id'],
             'branch' => ['nullable','string'],
             'cohort' => ['nullable','string'],
             'meta'   => ['nullable','array'],
+            'gender' => ['nullable', 'string', 'in:male,female,other'],
 
             'user' => ['required','array'],
             'user.name' => ['required','string','min:2'],

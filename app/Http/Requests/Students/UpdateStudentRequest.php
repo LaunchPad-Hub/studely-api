@@ -22,6 +22,8 @@ class UpdateStudentRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'university_id' => ['sometimes','required','exists:universities,id'],
+            'college_id' => ['sometimes','required','exists:colleges,id'],
             'branch' => ['nullable','string'],
             'cohort' => ['nullable','string'],
             'meta'   => ['nullable','array'],

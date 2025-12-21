@@ -23,8 +23,18 @@ class StudentResource extends JsonResource
             'branch'  => $this->branch,
             'cohort'  => $this->cohort,
             'meta'    => $this->meta,
-            'institution_name'    => $this->institution_name,
-            'university_name'    => $this->college?->name ?? null,
+            'university' => $this->whenLoaded('university', function() {
+                return [
+                    'id' => $this->university->id,
+                    'name' => $this->university->name,
+                ];
+            }),
+            'college' => $this->whenLoaded('college', function() {
+                return [
+                    'id' => $this->college->id,
+                    'name' => $this->college->name,
+                ];
+            }),
             'gender'    => $this->gender,
             'dob'    => $this->dob,
             'admission_year'    => $this->admission_year,
@@ -32,6 +42,7 @@ class StudentResource extends JsonResource
             'tenant_id' => $this->tenant_id,
             'college_id' => $this->college_id,
             'training_status' => $this->training_status,
+            'status' => $this->status,
             'created_at' => $this->created_at,
         ];
     }

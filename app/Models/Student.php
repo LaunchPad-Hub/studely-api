@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 class Student extends Model
 {
     use HasFactory;
+
+    const STATUS_INVITED        = 'invited';
     const STATUS_READY_BASELINE = 'ready_for_baseline';
     const BASELINE_IN_PROGRESS = 'baseline_in_progress';
     const STATUS_IN_TRAINING    = 'in_training';
@@ -15,12 +17,16 @@ class Student extends Model
     const FINAL_IN_PROGRESS    = 'final_in_progress';
     const STATUS_COMPLETED      = 'completed';
 
-    protected $fillable = ['tenant_id','user_id', 'college_id','reg_no','branch','cohort','meta', 'institution_name', 'university_name', 'gender', 'dob', 'admission_year', 'current_semester', 'training_status'];
+    protected $fillable = ['tenant_id','user_id', 'university_id', 'college_id','reg_no','branch','cohort','meta', 'institution_name', 'university_name', 'gender', 'dob', 'admission_year', 'current_semester', 'status', 'training_status'];
     protected $casts = ['meta'=>'array'];
 
     public function tenant(){ return $this->belongsTo(Tenant::class); }
 
     public function user(){ return $this->belongsTo(User::class); }
+
+    public function university(){
+         return $this->belongsTo(University::class);
+    }
 
     public function college(){
          return $this->belongsTo(College::class);

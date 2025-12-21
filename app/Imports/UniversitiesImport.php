@@ -47,7 +47,7 @@ class UniversitiesImport implements ToModel, WithHeadingRow
             'district'              => $row['district'],        // Excel header: "District"
             'location'              => $row['location'],        // Excel header: "Location"
             'website'               => $row['website'],         // Excel header: "Website"
-            'established_year'      => $row['founded'],         // Excel header: "Founded"
+            'established_year'      => $year,         // Excel header: "Founded"
         ]);
     }
 

@@ -215,11 +215,11 @@ class AuthController extends Controller
 
         $firstRole = $user->getRoleNames()->first();
 
-        if (!in_array($firstRole, ['SuperAdmin', 'Evaluator']) && (blank($user->registered_at) || blank($user->email_verified_at))) {
-            return response()->json([
-                'message' => 'Please complete registration before logging in.',
-            ], 403);
-        }
+        // if (!in_array($firstRole, ['SuperAdmin', 'Evaluator']) && (blank($user->registered_at) || blank($user->email_verified_at))) {
+        //     return response()->json([
+        //         'message' => 'Please complete registration before logging in.',
+        //     ], 403);
+        // }
 
         // revoke old tokens for this device name if you want single-session per device
         $deviceName = $data['device'] ?? 'web';

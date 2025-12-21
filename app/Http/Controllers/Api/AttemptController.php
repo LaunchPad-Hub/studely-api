@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Attempts\SaveProgressRequest;
 use App\Http\Resources\AttemptResource;
-use App\Models\{Assessment, Attempt, Question, Response, Student, User};
+use App\Models\{Assessment, Attempt, Module, Question, Response, Student, User};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +48,7 @@ class AttemptController extends Controller
      * * INTELLIGENT WORKFLOW START
      * Determines which assessment to start based on Student Training Status + Assessment Order.
      */
-    public function startCurrent(Request $r)
+     public function startCurrent(Request $r)
     {
         $user = $r->user();
         if (!$user || !$user->student) abort(403, 'Unauthorized');
@@ -56,7 +56,6 @@ class AttemptController extends Controller
         $student = $user->student;
         $tenantId = $user->tenant_id;
 
-        // Fetch IDs based on the defined order
         ['baseline_id' => $baselineId, 'final_id' => $finalId] = $this->getWorkflowIds($tenantId);
 
         if (!$baselineId) abort(404, 'No assessments configured.');
@@ -64,69 +63,63 @@ class AttemptController extends Controller
         $targetAssessmentId = null;
         $newStatus = null;
 
-        // --- Workflow State Machine ---
+        // Modules to filter (null = all modules)
+        $weakModuleIds = null;
+
         switch ($student->training_status) {
-            // 1. Start Baseline (First Attempt)
+            // ... [Baseline Cases remain same] ...
             case Student::STATUS_READY_BASELINE:
                 $targetAssessmentId = $baselineId;
                 $newStatus = Student::BASELINE_IN_PROGRESS;
                 break;
 
-            // 2. Resume Baseline
             case Student::BASELINE_IN_PROGRESS:
                 $targetAssessmentId = $baselineId;
-                // Status remains same
                 break;
 
-            // 3. Start Final
+            // --- FINAL ASSESSMENT LOGIC ---
             case Student::STATUS_READY_FINAL:
                 if (!$finalId) abort(404, 'Final assessment not configured yet.');
                 $targetAssessmentId = $finalId;
                 $newStatus = Student::FINAL_IN_PROGRESS;
+
+                // ** ADAPTIVE LOGIC: Identify Weak Modules **
+                // We check the performance in the Baseline ($baselineId)
+                $weakModuleIds = $this->identifyWeakModules($tenantId, $student->id, $baselineId, $finalId);
                 break;
 
-            // 4. Resume Final
             case Student::FINAL_IN_PROGRESS:
                 if (!$finalId) abort(404, 'Final assessment not configured yet.');
                 $targetAssessmentId = $finalId;
-                // Status remains same
+                // Note: We don't recalculate here; we rely on what was saved in Attempt->meta
                 break;
 
-            // Edge Cases
+            // ... [Edge cases remain same] ...
             case Student::STATUS_IN_TRAINING:
-                abort(403, 'You are currently in training. Please wait for approval to take the Final Assessment.');
-
+                abort(403, 'You are currently in training.');
             case Student::STATUS_COMPLETED:
-                // Optional: Allow them to view results, but strictly speaking, they can't "start" a new attempt.
                 abort(409, 'You have completed the programme.');
-
             default:
-                // Fallback for fresh students (null status) -> Treat as Ready for Baseline
                 $targetAssessmentId = $baselineId;
                 $newStatus = Student::BASELINE_IN_PROGRESS;
                 break;
         }
 
-        // --- Update Status if changing ---
         if ($newStatus && $student->training_status !== $newStatus) {
             $student->training_status = $newStatus;
             $student->save();
         }
 
-        return $this->createAttempt($tenantId, $student->id, $targetAssessmentId);
+        // Pass the calculated weak modules to createAttempt
+        return $this->createAttempt($tenantId, $student->id, $targetAssessmentId, $weakModuleIds);
     }
 
     /**
-     * Shared logic to create or retrieve the active attempt
+     * Updated logic to handle filtering
      */
-    private function createAttempt($tenantId, $studentId, $assessmentId)
+    private function createAttempt($tenantId, $studentId, $assessmentId, $filterModuleIds = null)
     {
-        // Ensure assessment exists within tenant
-        $assessment = Assessment::where('tenant_id', $tenantId)
-            ->with(['modules.questions.options'])
-            ->findOrFail($assessmentId);
-
-        // Fetch existing attempt or create new one
+        // 1. Fetch or Create the Attempt
         $attempt = Attempt::firstOrCreate(
             [
                 'tenant_id'     => $tenantId,
@@ -135,12 +128,92 @@ class AttemptController extends Controller
             ],
             [
                 'started_at' => now(),
+                // Store the filter in meta so resuming works correctly later
+                'meta' => $filterModuleIds ? ['focused_modules' => $filterModuleIds] : null
             ]
         );
 
-        $attempt->load(['assessment.modules.questions.options', 'responses']);
+        // 2. Determine which modules to load
+        // If we just created it, use $filterModuleIds.
+        // If it existed, read from DB meta.
+        $savedMeta = $attempt->meta; // Access as array thanks to casts
+        $modulesToLoad = $savedMeta['focused_modules'] ?? $filterModuleIds ?? null;
+
+        // 3. Eager Load with Filtering
+        $attempt->load([
+            'assessment',
+            // Advanced constraints on the 'modules' relationship
+            'assessment.modules' => function ($query) use ($modulesToLoad) {
+                $query->orderBy('order', 'asc');
+
+                // THE MAGIC: If we have specific IDs, only load those
+                if ($modulesToLoad && count($modulesToLoad) > 0) {
+                    $query->whereIn('id', $modulesToLoad);
+                }
+            },
+            'assessment.modules.questions.options',
+            'responses'
+        ]);
 
         return new AttemptResource($attempt);
+    }
+
+    /**
+     * ADAPTIVE ENGINE
+     * Compare Baseline performance to map to Final modules
+     */
+    private function identifyWeakModules($tenantId, $studentId, $baselineId, $finalId)
+    {
+        // 1. Find the student's *Submitted* baseline attempt
+        $baselineAttempt = Attempt::where('student_id', $studentId)
+            ->where('assessment_id', $baselineId)
+            ->whereNotNull('submitted_at')
+            ->latest()
+            ->first();
+
+        if (!$baselineAttempt) return null; // Fallback to all
+
+        // 2. Calculate Score PER MODULE in Baseline
+        // We assume Baseline Modules and Final Modules map by "Title" or "Code".
+        // If they map by Code, it's safer. Let's assume 'title' for now.
+
+        $modulePerformance = DB::table('responses')
+            ->join('questions', 'responses.question_id', '=', 'questions.id')
+            ->join('modules', 'questions.module_id', '=', 'modules.id')
+            ->join('options', 'responses.option_id', '=', 'options.id') // Assuming MCQ logic mostly
+            ->where('responses.attempt_id', $baselineAttempt->id)
+            ->select(
+                'modules.title', // or modules.code
+                DB::raw('SUM(questions.points) as total_possible'),
+                DB::raw('SUM(CASE WHEN options.is_correct THEN questions.points ELSE 0 END) as score_obtained')
+            )
+            ->groupBy('modules.title')
+            ->get();
+
+        $weakTitles = [];
+        foreach ($modulePerformance as $perf) {
+            $pct = ($perf->total_possible > 0)
+                ? ($perf->score_obtained / $perf->total_possible) * 100
+                : 0;
+
+            // THRESHOLD: If < 70%, they must retake this module
+            if ($pct < 70) {
+                $weakTitles[] = $perf->title;
+            }
+        }
+
+        // If they aced everything (empty weakTitles), force a specific logic?
+        // Usually, if list is empty, createAttempt returns ALL (null).
+        // If you want them to skip the final if they aced baseline, handle that logic upstream.
+        if (empty($weakTitles)) return null;
+
+        // 3. Find corresponding IDs in the FINAL Assessment
+        $finalModuleIds = Module::where('assessment_id', $finalId)
+            ->whereIn('title', $weakTitles) // Matching by Title
+            ->pluck('id')
+            ->toArray();
+
+        return $finalModuleIds;
     }
 
     public function saveProgress(SaveProgressRequest $req, $attemptId)

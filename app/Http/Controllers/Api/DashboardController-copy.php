@@ -21,212 +21,237 @@ use Illuminate\Support\Facades\DB;
 class DashboardController extends Controller
 {
 
-/**
+    /**
      * Admin dashboard endpoint.
      */
     public function admin(Request $request)
     {
-        /** @var User $user */
         $user = Auth::user();
-
-        if (!$user) {
-            abort(401, 'Unauthenticated.');
-        }
-
-        if (!$user->tenant_id) {
-            abort(400, 'Tenant context missing for admin.');
-        }
-
         $tenantId = $user->tenant_id;
 
-        $timeframe = $request->query('timeframe', 'today'); // today | 7d | 30d
+        $timeframe = $request->query('timeframe', 'today');
         [$from, $to] = $this->resolveTimeframe($timeframe);
 
-        // === Progress by College (Optimized) ===
-        // We move this up because we can use the result to populate the filters
-        // preventing us from loading 50k inactive colleges.
-        $progressByCollege = $this->buildProgressByCollege($tenantId);
+        // 1. KPI: Active Assessments
+        $activeAssessments = Assessment::where('tenant_id', $tenantId)
+            ->where('is_active', true)
+            ->count();
 
-        // === Colleges (Filter List) ===
-        // PERFORMANCE FIX: Do not load 50k colleges here.
-        // We only return colleges that actually have data in the progress report.
-        // For a full search of 50k colleges, you should use a separate 'search' endpoint.
-        $tenantsPayload = collect($progressByCollege)->map(function ($item) {
-            return [
-                'id'   => $item['tenantId'],
-                'name' => $item['tenantName'],
-            ];
-        })->values()->all();
-
-        // === Upcoming assessments (next 7–10 days) ===
-        $now = Carbon::now();
-        $upcomingWindowEnd = $now->copy()->addDays(10);
-
-        $participantCount = Student::where('tenant_id', $tenantId)->count();
-
-        $upcomingModules = Module::with('assessment')
-            ->whereHas('assessment', function ($q) use ($tenantId) {
-                $q->where('tenant_id', $tenantId)->where('is_active', true);
-            })
-            ->whereBetween('end_at', [$now, $upcomingWindowEnd])
-            ->orderBy('end_at')
-            ->limit(10)
-            ->get();
-
-        $upcoming = $upcomingModules->map(function (Module $m) use ($participantCount) {
-            $assessment = $m->assessment;
-            return [
-                'title'      => $assessment ? $assessment->title : $m->title,
-                'course'     => $m->title,
-                'due'        => optional($m->end_at)->format('M j'),
-                'count'      => $participantCount,
-                'status'     => $m->start_at && $m->start_at->isFuture() ? 'Scheduled' : 'Open',
-                'tenantId'   => null,
-                'tenantName' => null,
-            ];
-        })->values()->all();
-
-        // === Attempts (for timeframe) ===
-        // Note: With 50k colleges, ensure 'attempts' table is indexed on [tenant_id, submitted_at]
-        $attempts = Attempt::where('tenant_id', $tenantId)
-            ->whereNotNull('submitted_at')
+        // 2. KPI: Submissions & Average Score (SQL Aggregate)
+        // We calculate stats for the specific timeframe
+        $stats = Attempt::where('tenant_id', $tenantId)
             ->whereBetween('submitted_at', [$from, $to])
-            ->with([
-                'student.college',
-                'student.user',
-                'assessment.modules.questions',
-                'responses.option',
-                'responses.question',
-            ])
-            ->orderByDesc('submitted_at')
-            ->limit(500) // SAFETY: Limit this query so the loop below doesn't timeout if there are 10k submissions today
-            ->get();
+            ->selectRaw('COUNT(*) as total_submissions')
+            ->selectRaw('AVG(score) as avg_score')
+            ->first();
 
-        $moduleScoreRecords = [];
-        $studentModuleScores = [];
-        $recent = [];
+        $submissionsCount = $stats->total_submissions ?? 0;
+        $avgScoreValue = $stats->avg_score ? round($stats->avg_score) : null;
 
-        foreach ($attempts as $attempt) {
-            $assessment = $attempt->assessment;
-            if (!$assessment) continue;
+        // 3. KPI: At Risk Students (Approximation via SQL for speed)
+        // Students whose average attempt score is < 60
+        $atRiskCount = DB::table('attempts')
+            ->where('tenant_id', $tenantId)
+            ->select('student_id')
+            ->groupBy('student_id')
+            ->havingRaw('AVG(score) < 60')
+            ->count(); // This is much faster than looping PHP
 
-            $perAttemptScores = [];
-            foreach ($assessment->modules as $module) {
-                $score = $this->computeModuleScore($module, $attempt);
-                if ($score === null) continue;
-
-                $college = $attempt->student ? $attempt->student->college : null;
-                $collegeId = $college ? $college->id : null;
-
-                $moduleScoreRecords[] = [
-                    'score'      => $score,
-                    'college_id' => $collegeId,
-                ];
-
-                $perAttemptScores[] = $score;
-                $studentModuleScores[$attempt->student_id][] = $score;
-            }
-
-            if (count($perAttemptScores) === 0) continue;
-
-            $avgScore = (int) round(array_sum($perAttemptScores) / count($perAttemptScores));
-
-            $student = $attempt->student;
-            $studentName = $student && $student->user
-                ? $student->user->name
-                : 'Student #' . $attempt->student_id;
-
-            $college = $student ? $student->college : null;
-
-            $recent[] = [
-                'studentId'  => (string) $student->id,
-                'student_id' => $student->id,
-                'student'    => $studentName,
-                'module'     => $assessment->title,
-                'score'      => $avgScore,
-                'when'       => optional($attempt->submitted_at)->diffForHumans(),
-                'tenantId'   => $college ? (string) $college->id : null,
-                'tenantName' => $college ? $college->name : ($student->institution_name ?? '—'),
-            ];
-        }
-
-        $recent = array_slice($recent, 0, 20);
-
-        // === Score distributions ===
-        $scores = collect($moduleScoreRecords)->pluck('score');
-        $distribution = $this->buildScoreDistribution($scores);
 
         $distributionByTenant = [];
+
         $byCollege = collect($moduleScoreRecords)->groupBy('college_id');
 
         foreach ($byCollege as $collegeId => $rows) {
-            if ($collegeId === null) continue;
+            if ($collegeId === null) {
+                continue;
+            }
             $distributionByTenant[(string) $collegeId] = $this->buildScoreDistribution(
                 $rows->pluck('score')
             );
         }
 
-        // === Trend ===
-        $trend = $this->buildTrendFromAttempts($attempts, $from, $to);
-
-        // === KPIs ===
-        $activeAssessments = Assessment::where('tenant_id', $tenantId)
-            ->where('is_active', true)
-            ->count();
-
-        $submissionsCount = $attempts->count(); // This is count of loaded attempts
-        $avgScoreValue = $scores->count() ? (int) round($scores->avg()) : null;
-
-        $atRiskStudents = 0;
-        foreach ($studentModuleScores as $studentId => $list) {
-            if (!count($list)) continue;
-            if ((array_sum($list) / count($list)) < 60) {
-                $atRiskStudents++;
-            }
-        }
-
         $kpis = [
             ['label' => 'Active Assessments', 'value' => $activeAssessments, 'delta' => '+0'],
-            ['label' => 'Submissions (Period)', 'value' => $submissionsCount, 'delta' => '+0%'],
-            ['label' => 'Average Score', 'value' => $avgScoreValue !== null ? ($avgScoreValue . '%') : '—', 'delta' => '+0%'],
-            ['label' => 'At-risk Students', 'value' => $atRiskStudents, 'delta' => '+0'],
+            ['label' => 'Submissions', 'value' => $submissionsCount, 'delta' => '+0%'],
+            ['label' => 'Avg Score', 'value' => $avgScoreValue ? $avgScoreValue.'%' : '—', 'delta' => '+0%'],
+            ['label' => 'At-risk Students', 'value' => $atRiskCount, 'delta' => '—'],
         ];
 
-        $payload = [
-            'tenants'              => $tenantsPayload,
-            'kpis'                 => $kpis,
-            'trend'                => $trend,
-            'upcoming'             => $upcoming,
-            'recent'               => $recent,
-            'distribution'         => $distribution,
-            'distributionByTenant' => $distributionByTenant,
-            'progressByCollege'    => $progressByCollege,
-        ];
+        // 4. Trend (SQL Group By Date)
+        $trendData = Attempt::where('tenant_id', $tenantId)
+            ->whereBetween('submitted_at', [$from, $to])
+            ->selectRaw('DATE(submitted_at) as date, COUNT(*) as count')
+            ->groupBy('date')
+            ->orderBy('date')
+            ->pluck('count', 'date');
 
-        return response()->json(['data' => $payload]);
+        $trend = $this->fillTrendGaps($trendData, $from, $to);
+
+        // 5. Recent Activity (Eager load University via College)
+        $recentAttempts = Attempt::where('tenant_id', $tenantId)
+            ->whereNotNull('submitted_at')
+            ->whereBetween('submitted_at', [$from, $to])
+            ->with([
+                'student.user:id,name',
+                'student.college.university:id,name', // Load University
+                'assessment:id,title'
+            ])
+            ->orderByDesc('submitted_at')
+            ->limit(10)
+            ->get();
+
+        $recent = $recentAttempts->map(function($a) {
+            $student = $a->student;
+            $college = $student ? $student->college : null;
+            $university = $college ? $college->university : null;
+
+            return [
+                'student' => $student && $student->user ? $student->user->name : "Student #{$a->student_id}",
+                'module'  => $a->assessment->title ?? 'Unknown',
+                'score'   => $a->score,
+                'when'    => $a->submitted_at->diffForHumans(),
+                'college' => $college ? $college->name : '—',
+                'university' => $university ? $university->name : '—', // Added University
+            ];
+        });
+
+        // 6. Progress by University (Top 10 by volume)
+        // Instead of 50k colleges, we group by University ID which is cleaner
+        $progressData = DB::table('attempts')
+            ->join('students', 'attempts.student_id', '=', 'students.id')
+            ->join('colleges', 'students.college_id', '=', 'colleges.id')
+            ->join('universities', 'colleges.university_id', '=', 'universities.id')
+            ->where('attempts.tenant_id', $tenantId)
+            ->selectRaw('universities.name as uni_name, count(*) as total_attempts, AVG(attempts.score) as avg_score')
+            ->groupBy('universities.id', 'universities.name')
+            ->orderByDesc('total_attempts')
+            ->limit(10)
+            ->get();
+
+        $progressByEntity = $progressData->map(function($row) {
+            return [
+                'name' => $row->uni_name,
+                'submissions' => $row->total_attempts,
+                'avg_score' => round($row->avg_score)
+            ];
+        });
+
+        // 7. Upcoming
+        $upcoming = Module::whereHas('assessment', fn($q) => $q->where('tenant_id', $tenantId)->where('is_active', true))
+            ->where('end_at', '>=', Carbon::now())
+            ->orderBy('end_at')
+            ->limit(5)
+            ->get()
+            ->map(fn($m) => [
+                'title' => $m->title,
+                'due' => $m->end_at ? $m->end_at->format('M d') : 'No Due Date',
+                'status' => 'Open'
+            ]);
+
+        // Score Distribution (Global)
+        $scores = Attempt::where('tenant_id', $tenantId)
+             ->whereBetween('submitted_at', [$from, $to])
+             ->pluck('score');
+        $distribution = $this->buildScoreDistribution($scores);
+
+        return response()->json(['data' => [
+            'kpis' => $kpis,
+            'trend' => $trend,
+            'recent' => $recent,
+            'upcoming' => $upcoming,
+            'distribution' => $distribution,
+            'progressByEntity' => $progressByEntity, // Now University based
+            'progressByCollege' => $this->buildProgressByCollege($tenantId),
+            'distributionByTenant' => [], // Placeholder for future multi-tenant
+        ]]);
+    }
+
+    protected function buildProgressByCollege(int $tenantId): array
+    {
+        // Only fetch Top 10 colleges by student count
+        // This prevents loading 50,000 colleges and crashing the dashboard
+        $colleges = College::where('tenant_id', $tenantId)
+            ->withCount('students')
+            ->orderByDesc('students_count')
+            ->limit(10)
+            ->get();
+
+        if ($colleges->isEmpty()) {
+            return [];
+        }
+
+        $collegeIds = $colleges->pluck('id')->toArray();
+
+        // Identify assessments
+        $assessments = Assessment::where('tenant_id', $tenantId)->get();
+        $baseline = $assessments->firstWhere('title', 'like', '%Baseline%') ?? $assessments->first();
+        $final = $assessments->firstWhere('title', 'like', '%Final%');
+
+        // Helper to count unique completions per college for a specific assessment
+        $countCompletions = function ($assessmentId) use ($collegeIds) {
+            if (!$assessmentId) return collect();
+
+            return DB::table('attempts')
+                ->join('students', 'attempts.student_id', '=', 'students.id')
+                ->where('attempts.assessment_id', $assessmentId)
+                ->whereNotNull('attempts.submitted_at')
+                ->whereIn('students.college_id', $collegeIds)
+                ->selectRaw('students.college_id, count(distinct attempts.student_id) as count')
+                ->groupBy('students.college_id')
+                ->pluck('count', 'college_id');
+        };
+
+        $baselineCounts = $countCompletions($baseline?->id);
+        $finalCounts = $countCompletions($final?->id);
+
+        $progress = [];
+
+        foreach ($colleges as $college) {
+            $total = $college->students_count;
+            $a1 = $baselineCounts[$college->id] ?? 0;
+            $a2 = $finalCounts[$college->id] ?? 0;
+
+            $progress[] = [
+                'tenantId'    => (string) $college->id,
+                'tenantName'  => $college->name,
+                'total'       => $total,
+                'a1Completed' => $a1,
+                'a2Completed' => $a2,
+                'a1Status'    => $this->progressStatusLabel($a1, $total),
+                'a2Status'    => $this->progressStatusLabel($a2, $total),
+            ];
+        }
+
+        return $progress;
     }
 
     /**
      * Resolve timeframe into [from, to] Carbon dates.
      */
-    protected function resolveTimeframe(string $timeframe): array
+     protected function resolveTimeframe(string $timeframe): array
     {
         $now = Carbon::now();
-
-        switch ($timeframe) {
-            case '7d':
-                $from = $now->copy()->subDays(7);
-                break;
-            case '30d':
-                $from = $now->copy()->subDays(30);
-                break;
-            case 'today':
-            default:
-                $from = $now->copy()->startOfDay();
-                break;
-        }
-
+        $from = match($timeframe) {
+            '7d' => $now->copy()->subDays(7),
+            '30d' => $now->copy()->subDays(30),
+            default => $now->copy()->startOfDay(),
+        };
         return [$from, $now];
+    }
+
+    protected function fillTrendGaps($data, $from, $to)
+    {
+        $trend = [];
+        $period = $from->diffInDays($to);
+        // Limit to last 12 points max to not break UI sparkline
+        $step = max(1, floor($period / 12));
+
+        for ($i = 0; $i <= $period; $i += $step) {
+            $date = $from->copy()->addDays($i)->format('Y-m-d');
+            $trend[] = $data[$date] ?? 0;
+        }
+        return $trend;
     }
 
     /**
@@ -236,35 +261,22 @@ class DashboardController extends Controller
     {
         $scores = collect($scores)->filter(fn ($v) => $v !== null)->values();
         $total = max(1, $scores->count());
-
-        $buckets = [
-            '90–100' => 0,
-            '80–89'  => 0,
-            '70–79'  => 0,
-            '60–69'  => 0,
-            '< 60'   => 0,
-        ];
+        $buckets = ['90–100' => 0, '80–89' => 0, '70–79' => 0, '60–69' => 0, '< 60' => 0];
+        $total = $scores->count();
+        if ($total === 0) return [];
 
         foreach ($scores as $s) {
-            if ($s >= 90) {
-                $buckets['90–100']++;
-            } elseif ($s >= 80) {
-                $buckets['80–89']++;
-            } elseif ($s >= 70) {
-                $buckets['70–79']++;
-            } elseif ($s >= 60) {
-                $buckets['60–69']++;
-            } else {
-                $buckets['< 60']++;
-            }
+            if ($s >= 90) $buckets['90–100']++;
+            elseif ($s >= 80) $buckets['80–89']++;
+            elseif ($s >= 70) $buckets['70–79']++;
+            elseif ($s >= 60) $buckets['60–69']++;
+            else $buckets['< 60']++;
         }
 
-        return collect($buckets)->map(function ($count, $label) use ($total) {
-            return [
-                'label' => $label,
-                'pct'   => (int) round(($count / $total) * 100),
-            ];
-        })->values()->all();
+        return collect($buckets)->map(fn($val, $key) => [
+            'label' => $key,
+            'pct' => round(($val / $total) * 100)
+        ])->values()->all();
     }
 
     /**
@@ -288,69 +300,6 @@ class DashboardController extends Controller
         return $trend;
     }
 
-/**
-     * Build progress per College for A1/A2.
-     * OPTIMIZED for 50k+ colleges - uses SQL Aggregation.
-     */
-    protected function buildProgressByCollege(int $tenantId): array
-    {
-        // 1. Identify Baseline and Final Assessment IDs
-        $assessments = Assessment::where('tenant_id', $tenantId)->get(['id', 'title']);
-
-        $baseline = $assessments->first(fn($a) => stripos($a->title, 'Baseline') !== false)
-                    ?? $assessments->first();
-
-        $final = $assessments->first(fn($a) => stripos($a->title, 'Final') !== false);
-
-        $baselineId = $baseline ? $baseline->id : 0;
-        $finalId = $final ? $final->id : 0;
-
-        // 2. Perform Single Aggregated Query
-        // We join Attempts -> Students -> Colleges.
-        // We GROUP BY College.
-        // We Filter WHERE attempts.submitted_at IS NOT NULL.
-
-        $results = DB::table('colleges')
-            ->leftJoin('universities', 'colleges.university_id', '=', 'universities.id')
-            ->join('students', 'students.college_id', '=', 'colleges.id')
-            ->join('attempts', 'attempts.student_id', '=', 'students.id')
-            ->where('colleges.tenant_id', $tenantId)
-            ->whereNotNull('attempts.submitted_at')
-            // Only care about baseline or final for the counts, but the join ensures activity
-            ->whereIn('attempts.assessment_id', [$baselineId, $finalId])
-            ->select(
-                'colleges.id',
-                'colleges.name',
-                'universities.name as university_name',
-                // Subquery to get accurate Total Students count for the college (independent of attempts)
-                DB::raw("(SELECT COUNT(*) FROM students s WHERE s.college_id = colleges.id AND s.tenant_id = {$tenantId}) as total_students"),
-                // Conditional counts for A1/A2
-                DB::raw("COUNT(DISTINCT CASE WHEN attempts.assessment_id = {$baselineId} THEN attempts.student_id END) as a1_completed"),
-                DB::raw("COUNT(DISTINCT CASE WHEN attempts.assessment_id = {$finalId} THEN attempts.student_id END) as a2_completed")
-            )
-            ->groupBy('colleges.id', 'colleges.name', 'universities.name')
-            ->get();
-
-        // 3. Map to Frontend format
-        $progress = $results->map(function ($row) {
-            $total = (int) $row->total_students;
-            $a1 = (int) $row->a1_completed;
-            $a2 = (int) $row->a2_completed;
-
-            return [
-                'tenantId'    => (string) $row->id,
-                'tenantName'  => $row->name,
-                'universityName' => $row->university_name,
-                'total'       => $total,
-                'a1Completed' => $a1,
-                'a2Completed' => $a2,
-                'a1Status'    => $this->progressStatusLabel($a1, $total),
-                'a2Status'    => $this->progressStatusLabel($a2, $total),
-            ];
-        })->values()->all();
-
-        return $progress;
-    }
 
     protected function progressStatusLabel(int $completed, int $total): string
     {
@@ -616,7 +565,7 @@ class DashboardController extends Controller
         $href = '/assessment/attempt';
 
         switch ($stage) {
-            case 'baseline_not_started':
+            case 'ready_for_baseline':
                 return [
                     'label'  => 'Start Baseline Assessment',
                     'status' => 'ready',
@@ -673,7 +622,7 @@ class DashboardController extends Controller
         $currentAssessment = null;
         $currentAttempt = null;
 
-        if (in_array($stage, ['baseline_not_started', 'baseline_in_progress'], true)) {
+        if (in_array($stage, ['ready_for_baseline', 'baseline_in_progress'], true)) {
             $currentAssessment = $baseline;
             $currentAttempt = $baselineAttempt;
         } elseif (in_array($stage, ['final_not_started', 'final_in_progress'], true)) {
@@ -763,7 +712,7 @@ class DashboardController extends Controller
 
         // Upcoming modules come from the "current" assessment.
         $currentAssessment = null;
-        if (in_array($stage, ['baseline_not_started', 'baseline_in_progress'], true)) {
+        if (in_array($stage, ['ready_for_baseline', 'baseline_in_progress'], true)) {
             $currentAssessment = $baseline;
         } elseif (in_array($stage, ['final_not_started', 'final_in_progress'], true)) {
             $currentAssessment = $final;

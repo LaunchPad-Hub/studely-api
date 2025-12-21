@@ -41,6 +41,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('universities', UniversityController::class);
 
         // Students
+        Route::post('/students/{id}/invite', [StudentController::class, 'invite']);
         Route::get('students', [StudentController::class, 'index']);
         Route::post('students', [StudentController::class, 'store']);
         Route::post('students/import', [StudentImportController::class, 'import']);

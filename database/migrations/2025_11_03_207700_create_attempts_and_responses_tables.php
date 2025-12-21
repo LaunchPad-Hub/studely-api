@@ -15,6 +15,7 @@ return new class extends Migration {
             $table->integer('duration_sec')->default(0);
             $table->decimal('score',6,2)->default(1);
             $table->decimal('total_marks',6,2)->default(1);
+            $table->json('meta')->nullable();
             $table->timestamps();
             $table->unique(['assessment_id','student_id']);
         });

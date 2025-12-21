@@ -65,7 +65,7 @@ return [
     |
     */
 
-    'frontend_url' => env('FRONTEND_URL', 'https://studely-client.vercel.app/'),
+    'frontend_url' => env('FRONTEND_URL', 'https://app.focillionglobal.in'),
 
     /*
     |--------------------------------------------------------------------------

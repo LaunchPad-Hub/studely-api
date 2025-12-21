@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\FinalAssessmentQualified;
 use App\Models\Assessment;
 use App\Models\Attempt;
+use App\Models\Module;
 use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 
 class ReportController extends Controller
 {
@@ -186,11 +189,11 @@ class ReportController extends Controller
         $history = Attempt::where('attempts.student_id', $studentId)
             ->join('assessments', 'attempts.assessment_id', '=', 'assessments.id')
             ->select(
-                'attempts.*',
+                'attempts.*', // This ensures 'meta' is retrieved
                 'assessments.title as assessment_title',
                 'assessments.id as assessment_id'
             )
-            ->orderBy('attempts.submitted_at', 'desc') // Usually recent first is better
+            ->orderBy('attempts.submitted_at', 'desc')
             ->get()
             ->map(function ($attempt) {
                 // Cohort Stats
@@ -201,21 +204,33 @@ class ReportController extends Controller
                 $total = $attempt->total_marks > 0 ? $attempt->total_marks : 1;
                 $myPct = ($attempt->score / $total) * 100;
 
+                // --- ADAPTIVE LOGIC: Resolve Focused Modules ---
+                $focusedModuleNames = [];
+                // Check if 'meta' has the key (Attempt model must cast 'meta' => 'array')
+                if (!empty($attempt->meta['focused_modules'])) {
+                    $focusedModuleNames = Module::whereIn('id', $attempt->meta['focused_modules'])
+                        ->pluck('title')
+                        ->toArray();
+                }
+
                 return [
-                    'id' => $attempt->id, // <--- CRITICAL FIX: Include the attempt ID
+                    'id' => $attempt->id,
                     'assessment' => $attempt->assessment_title,
                     'score_obtained' => $attempt->score,
                     'total_mark' => $attempt->total_marks,
                     'score' => round($myPct),
                     'cohort_avg' => round($cohortPct),
                     'date' => $attempt->submitted_at?->format('Y-m-d'),
-                    'duration' => $attempt->duration_sec ? gmdate("H:i:s", $attempt->duration_sec) : 'N/A'
+                    'duration' => $attempt->duration_sec ? gmdate("H:i:s", $attempt->duration_sec) : 'N/A',
+                    // New Adaptive Fields
+                    'is_adaptive' => !empty($focusedModuleNames),
+                    'focused_modules' => $focusedModuleNames
                 ];
             });
 
         $weakPoints = $this->getWeakPoints($tenantId, $studentId);
 
-        // Stats
+        // Stats Calculation
         $myGlobalAvg = $history->avg('score') ?? 0;
         $totalAttempts = $history->count();
 
@@ -261,6 +276,7 @@ class ReportController extends Controller
         $attempt = Attempt::where('tenant_id', $tenantId)
             ->with([
                 'assessment',
+                'responses.question.module',
                 'responses.question.options',
                 'responses.option'
             ])
@@ -268,7 +284,6 @@ class ReportController extends Controller
 
         $responses = $attempt->responses->map(function ($resp) {
             $q = $resp->question;
-
             $isCorrect = false;
             $correctText = null;
 
@@ -299,6 +314,8 @@ class ReportController extends Controller
                     'text' => $q->stem ?? 'Question Text',
                     'type' => $q->type,
                     'points' => $q->points,
+                    'module' => $q->module->title ?? 'General'
+                    // 'topic' => $q->topic, // Useful for frontend grouping
                 ],
                 'option' => $resp->option ? [
                     'text' => $resp->option->label,
@@ -313,6 +330,14 @@ class ReportController extends Controller
         $total = $attempt->total_marks > 0 ? $attempt->total_marks : 1;
         $pct = ($attempt->score / $total) * 100;
 
+        // --- ADAPTIVE LOGIC: Fetch names for details view ---
+        $focusedModuleNames = [];
+        if (!empty($attempt->meta['focused_modules'])) {
+            $focusedModuleNames = Module::whereIn('id', $attempt->meta['focused_modules'])
+                ->pluck('title')
+                ->toArray();
+        }
+
         return response()->json([
             'id' => $attempt->id,
             'score' => round($pct),
@@ -321,6 +346,10 @@ class ReportController extends Controller
                 'title' => $attempt->assessment->title,
                 'total_mark' => $attempt->total_marks
             ],
+            // Adaptive Fields
+            'is_adaptive' => !empty($focusedModuleNames),
+            'focused_modules' => $focusedModuleNames,
+
             'responses' => $responses
         ]);
     }
@@ -330,6 +359,7 @@ class ReportController extends Controller
         $query = DB::table('responses')
             ->join('attempts', 'responses.attempt_id', '=', 'attempts.id')
             ->join('questions', 'responses.question_id', '=', 'questions.id')
+            ->join('modules', 'questions.module_id', '=', 'modules.id')
             ->join('options', 'responses.option_id', '=', 'options.id')
             ->where('attempts.tenant_id', $tenantId)
             ->whereNotNull('questions.topic');
@@ -339,11 +369,11 @@ class ReportController extends Controller
         }
 
         return $query->select(
-                'questions.topic',
+            'modules.title as topic',
                 DB::raw('COUNT(*) as total_attempts'),
                 DB::raw('AVG(options.is_correct) * 100 as avg_score')
             )
-            ->groupBy('questions.topic')
+            ->groupBy('modules.title')
             ->orderBy('avg_score', 'asc')
             ->limit(8)
             ->get()
@@ -366,7 +396,10 @@ class ReportController extends Controller
     {
         $tenantId = $request->user()->tenant_id;
 
-        $student = Student::where('tenant_id', $tenantId)->findOrFail($studentId);
+        // Eager load 'user' so we can access name/email for the mailable
+        $student = Student::where('tenant_id', $tenantId)
+            ->with('user')
+            ->findOrFail($studentId);
 
         // Optional: specific validation to ensure they are in_training
         if ($student->training_status !== 'in_training') {
@@ -377,8 +410,13 @@ class ReportController extends Controller
             'training_status' => 'ready_for_final'
         ]);
 
+        // --- Send Email Notification ---
+        if ($student->user && $student->user->email) {
+            Mail::to($student->user)->send(new FinalAssessmentQualified($student));
+        }
+
         return response()->json([
-            'message' => 'Student approved for final assessment.',
+            'message' => 'Student approved for final assessment. Email notification sent.',
             'training_status' => 'ready_for_final'
         ]);
     }

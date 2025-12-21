@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('tenant_id')->constrained();
             $table->foreignId('user_id')->nullable()->constrained();
+            $table->foreignId('university_id')->nullable()->constrained();
             $table->foreignId('college_id')->nullable()->constrained();
             $table->string('reg_no');
             $table->string('branch')->nullable();
@@ -27,6 +28,7 @@ return new class extends Migration
             $table->year('admission_year')->nullable();
             $table->unsignedTinyInteger('current_semester')->nullable();
             $table->string('training_status')->default('ready_for_baseline');
+            $table->string('status')->default('not_invited');
             $table->timestamps();
 
             $table->unique(['tenant_id','reg_no']);

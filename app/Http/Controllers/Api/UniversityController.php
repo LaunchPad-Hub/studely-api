@@ -19,7 +19,14 @@ class UniversityController extends Controller
     public function index(Request $request)
     {
         $tid = Auth::user()?->tenant_id;
-        $paginated = University::where('tenant_id', $tid)->latest()->paginate(20);
+
+        // Get per_page from request, default to 20 if missing.
+        // This allows your frontend 'list({ per_page: 1000 })' to work.
+        $perPage = $request->input('per_page', 100);
+
+        $paginated = University::where('tenant_id', $tid)
+            ->latest()
+            ->paginate($perPage);
 
         return UniversityResource::collection($paginated);
     }
