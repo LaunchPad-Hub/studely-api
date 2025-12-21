@@ -171,7 +171,7 @@ class StudentController extends Controller
 
         // Ensure FRONTEND_URL is set in .env
         $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
-        $url = "{$frontendUrl}/set-password?token={$token}&email=" . urlencode($user->email);
+        $url = "{$frontendUrl}/auth/set-password?token={$token}&email=" . urlencode($user->email);
 
         Mail::to($user)->send(new StudentInvite($user, $url));
 
