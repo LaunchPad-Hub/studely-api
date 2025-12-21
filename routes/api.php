@@ -12,6 +12,7 @@ use App\Http\Middleware\ScopeTenant;
 Route::prefix('v1')->group(function () {
     // Auth
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/set-password', [AuthController::class, 'setPassword']);
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     Route::post('/register/init', [AuthController::class, 'registerInit']);
     Route::post('/register/complete', [AuthController::class, 'registerComplete']);
