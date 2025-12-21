@@ -74,6 +74,7 @@ class StudentController extends Controller
                 'branch'        => $data['branch'] ?? null,
                 'cohort'        => $data['cohort'] ?? null,
                 'meta'          => $data['meta'] ?? null,
+                'training_status' => 'ready_for_baseline'
                 // 'status'        => Student::STATUS_CREATED, // Ensure this constant exists in Model
             ]);
 

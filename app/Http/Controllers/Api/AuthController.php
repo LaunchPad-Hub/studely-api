@@ -115,7 +115,10 @@ class AuthController extends Controller
             $user = User::where('email', $request->email)->first();
             if ($user && $user->student) {
                 // Ensure you have a STATUS_ACTIVE constant or similar
-                $user->student->update(['status' => 'active']);
+                $user->student->update([
+                    'status' => 'active',
+                    'training_status' => 'ready_for_baseline'
+                ]);
             }
 
             return response()->json(['message' => __($status)]);
