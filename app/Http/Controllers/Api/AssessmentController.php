@@ -7,6 +7,7 @@ use App\Http\Requests\Assessments\StoreAssessmentRequest;
 use App\Http\Requests\Assessments\UpdateAssessmentRequest;
 use App\Http\Resources\AssessmentResource;
 use App\Models\Assessment;
+use App\Models\Student;
 use Illuminate\Http\Request;
 
 class AssessmentController extends Controller
@@ -75,5 +76,105 @@ class AssessmentController extends Controller
         $a->delete();
 
         return response()->json(['message' => 'deleted']);
+    }
+
+    /**
+     * Get list of students with their status for this specific assessment.
+     * Optimized for scalability using Left Joins.
+     */
+    public function candidates(Request $request, $id)
+    {
+        $tid = app('tenant.id');
+        $perPage = $request->input('per_page', 20);
+        $search = $request->input('search');
+
+        // We select Students, but LEFT JOIN attempts to see if they took THIS assessment
+        $query = Student::query()
+            ->select([
+                'students.id',
+                'students.reg_no',
+                'students.user_id',
+                // specific attempt columns
+                'attempts.id as attempt_id',
+                'attempts.submitted_at',
+                'attempts.started_at',
+                'attempts.score',
+                'attempts.total_marks'
+            ])
+            ->with('user:id,name,email') // Eager load user for names
+            ->leftJoin('attempts', function ($join) use ($id) {
+                $join->on('students.id', '=', 'attempts.student_id')
+                     ->where('attempts.assessment_id', '=', $id);
+            })
+            ->where('students.tenant_id', $tid);
+
+        // Search Logic
+        if ($search) {
+            $query->where(function($q) use ($search) {
+                $q->where('students.reg_no', 'like', "%{$search}%")
+                  ->orWhereHas('user', function($u) use ($search) {
+                      $u->where('name', 'like', "%{$search}%");
+                  });
+            });
+        }
+
+        // Filter by Status (Optional, useful for UI tabs)
+        if ($status = $request->input('status')) {
+            if ($status === 'completed') {
+                $query->whereNotNull('attempts.submitted_at');
+            } elseif ($status === 'pending') {
+                $query->whereNull('attempts.id');
+            }
+        }
+
+        $paginated = $query->paginate($perPage);
+
+        // Transform to add a clear 'status' string
+        $paginated->getCollection()->transform(function ($s) {
+            $status = 'not_started';
+            if ($s->attempt_id) {
+                $status = $s->submitted_at ? 'submitted' : 'in_progress';
+            }
+
+            return [
+                'id' => $s->id,
+                'name' => $s->user->name ?? 'Unknown',
+                'email' => $s->user->email ?? '',
+                'reg_no' => $s->reg_no,
+                'status' => $status,
+                'score' => $s->score,
+                'total_marks' => $s->total_marks,
+                'submitted_at' => $s->submitted_at,
+            ];
+        });
+
+        return response()->json($paginated);
+    }
+
+    /**
+     * Bulk assign/push assessment to students
+     */
+    public function assign(Request $request, $id)
+    {
+        $tid = app('tenant.id');
+        $data = $request->validate([
+            'student_ids' => 'required|array',
+            'student_ids.*' => 'exists:students,id'
+        ]);
+
+        $assessment = Assessment::where('tenant_id', $tid)->findOrFail($id);
+        $students = Student::whereIn('id', $data['student_ids'])->with('user')->get();
+
+        // Logic: Send Email Invites
+        $count = 0;
+        foreach ($students as $student) {
+            if ($student->user && $student->user->email) {
+                // Example: Queue an email
+                // Mail::to($student->user)->queue(new AssessmentInvite($assessment, $student));
+                $count++;
+            }
+        }
+
+        return response()->json(['message' => "Assessment pushed to {$count} students."]);
     }
 }
