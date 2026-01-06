@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Assessments\StoreAssessmentRequest;
 use App\Http\Requests\Assessments\UpdateAssessmentRequest;
 use App\Http\Resources\AssessmentResource;
+use App\Mail\AssessmentInvite;
 use App\Models\Assessment;
 use App\Models\Student;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 
 class AssessmentController extends Controller
 {
@@ -170,7 +172,7 @@ class AssessmentController extends Controller
         foreach ($students as $student) {
             if ($student->user && $student->user->email) {
                 // Example: Queue an email
-                // Mail::to($student->user)->queue(new AssessmentInvite($assessment, $student));
+                Mail::to($student->user)->queue(new AssessmentInvite($assessment, $student));
                 $count++;
             }
         }
