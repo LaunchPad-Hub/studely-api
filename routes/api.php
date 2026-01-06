@@ -58,6 +58,7 @@ Route::prefix('v1')->group(function () {
 
         // Bulk assign/push assessment to students
         Route::post('/assessments/{id}/assign', [AssessmentController::class, 'assign']);
+
         Route::apiResource('assessments', AssessmentController::class);
 
         // Questions & Options

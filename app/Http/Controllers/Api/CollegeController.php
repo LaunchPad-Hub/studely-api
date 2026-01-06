@@ -24,7 +24,9 @@ class CollegeController extends Controller
         // This allows your frontend 'list({ per_page: 1000 })' to work.
         $perPage = $request->input('per_page', 100);
 
-        $paginated = College::where('tenant_id', $tid)->latest()->paginate($perPage);
+        $paginated = College::where('tenant_id', $tid)
+        ->latest()
+            ->paginate($perPage);
 
         return CollegeResource::collection($paginated);
     }

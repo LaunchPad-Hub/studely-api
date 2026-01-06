@@ -65,6 +65,11 @@ class CollegesImport implements
         // Debug first row
         // Log::info('Importing Row:', $row);
 
+        $code = isset($row['code']) ? trim($row['code']) : null;
+        if(!$code) {
+            return null;
+        }
+
         $uniCode = isset($row['university_code']) ? trim($row['university_code']) : null;
 
         if (!$uniCode || !isset($this->universities[$uniCode])) {
