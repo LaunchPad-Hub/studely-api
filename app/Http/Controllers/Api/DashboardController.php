@@ -582,11 +582,18 @@ class DashboardController extends Controller
     protected function computeStage(?Attempt $baselineAttempt, ?Attempt $finalAttempt, ?string $trainingStatus = null): string
     {
 
-        // If the student is in training, override everything
+        // Force Training
         if ($trainingStatus === 'in_training') {
             return 'in_training';
         }
 
+        // Check if strictly approved for baseline
+        if (!$baselineAttempt && $trainingStatus !== 'ready_for_baseline') {
+             // You might want a 'pending_approval' case here if strictly enforcing approval
+             // But usually, 'ready_for_baseline' is the default for new students in your logic
+        }
+
+        // Normal flow
         if (!$baselineAttempt) {
             return 'ready_for_baseline';
         }
@@ -616,13 +623,15 @@ class DashboardController extends Controller
         $href = '/assessment/attempt';
 
         switch ($stage) {
-            case 'baseline_not_started':
+            // Changed from 'baseline_not_started' to 'ready_for_baseline'
+            case 'ready_for_baseline':
                 return [
                     'label'  => 'Start Baseline Assessment',
                     'status' => 'ready',
                     'helper' => 'Modules will unlock one by one.',
                     'href'   => $href,
                 ];
+
             case 'baseline_in_progress':
                 return [
                     'label'  => 'Continue Baseline Assessment',
@@ -630,13 +639,16 @@ class DashboardController extends Controller
                     'helper' => 'Finish your current module to unlock the next one.',
                     'href'   => $href,
                 ];
-            case 'final_not_started':
+
+             // [FIX] Changed from 'final_not_started' to 'ready_for_final'
+            case 'ready_for_final':
                 return [
                     'label'  => 'Start Final Assessment',
                     'status' => 'ready',
                     'helper' => 'You’ll retake selected modules to measure your progress.',
                     'href'   => $href,
                 ];
+
             case 'final_in_progress':
                 return [
                     'label'  => 'Continue Final Assessment',
@@ -644,12 +656,14 @@ class DashboardController extends Controller
                     'helper' => 'Modules will open in sequence.',
                     'href'   => $href,
                 ];
+
             case 'completed':
                 return [
                     'label'  => 'Programme completed',
                     'status' => 'completed',
                     'helper' => 'You can review your scores anytime.',
                 ];
+
             default:
                 return [
                     'label'  => 'Assessment not available yet',
