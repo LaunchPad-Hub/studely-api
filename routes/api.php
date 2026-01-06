@@ -52,6 +52,12 @@ Route::prefix('v1')->group(function () {
 
         // Modules & Assessments
         Route::apiResource('modules', ModuleController::class);
+
+        // Get list of candidates (students + status) for a specific assessment
+        Route::get('/assessments/{id}/candidates', [AssessmentController::class, 'candidates']);
+
+        // Bulk assign/push assessment to students
+        Route::post('/assessments/{id}/assign', [AssessmentController::class, 'assign']);
         Route::apiResource('assessments', AssessmentController::class);
 
         // Questions & Options
