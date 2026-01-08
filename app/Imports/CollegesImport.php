@@ -13,8 +13,8 @@ use Maatwebsite\Excel\Concerns\WithBatchInserts;
 use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
-use Maatwebsite\Excel\Concerns\WithLimit;    // 1. Add Limit
-use Maatwebsite\Excel\Concerns\WithStartRow; // 2. Add StartRow
+use Maatwebsite\Excel\Concerns\WithLimit;
+use Maatwebsite\Excel\Concerns\WithStartRow;
 
 class CollegesImport implements
     ToModel,
@@ -23,10 +23,11 @@ class CollegesImport implements
     WithChunkReading,
     WithCustomCsvSettings,
     ShouldQueue,
-    WithLimit,    // Implement
-    WithStartRow  // Implement
+    WithLimit,
+    WithStartRow
 {
     private $universities;
+    private $existingColleges;
     private $tenant_id;
     private $batch;
 
@@ -34,15 +35,22 @@ class CollegesImport implements
     public function __construct($batch = 1)
     {
         $this->tenant_id = Auth::user()?->tenant_id;
-        $this->batch = max(1, intval($batch)); // Ensure at least 1
+        $this->batch = max(1, intval($batch));
 
         // Force High Memory/Time Limits for this job
         ini_set('memory_limit', '2048M');
         ini_set('max_execution_time', 3600);
 
+        // Cache Universities map (Code -> ID)
         $this->universities = Cache::remember('uni_map_' . $this->tenant_id, 3600, function () {
             return University::pluck('id', 'code')->toArray();
         });
+
+        // Cache Existing Colleges to prevent duplicates (Code -> ID)
+        // This makes duplicate checking O(1) and prevents query spam
+        $this->existingColleges = College::where('tenant_id', $this->tenant_id)
+            ->pluck('id', 'code')
+            ->toArray();
     }
 
     // Limit to 15,000 rows per run
@@ -56,37 +64,46 @@ class CollegesImport implements
     {
         // Batch 1: Start at row 2 (Row 1 is header)
         // Batch 2: Start at row 15002
-        // Formula: (Batch - 1) * Limit + Start_Offset
         return ($this->batch - 1) * 15000 + 2;
     }
 
     public function model(array $row)
     {
-        // Debug first row
-        // Log::info('Importing Row:', $row);
-
+        // 1. Sanitize & Empty Check
         $code = isset($row['code']) ? trim($row['code']) : null;
-        if(!$code) {
+        $name = isset($row['name']) ? trim($row['name']) : null;
+
+        // Skip row if essential data is missing
+        if (empty($code) || empty($name)) {
             return null;
         }
 
+        // 2. Duplicate Check
+        // If this college code already exists, skip it.
+        if (isset($this->existingColleges[$code])) {
+            return null;
+        }
+
+        // 3. Validation: University Code
         $uniCode = isset($row['university_code']) ? trim($row['university_code']) : null;
 
+        // Skip if university code is missing or doesn't exist in our DB
         if (!$uniCode || !isset($this->universities[$uniCode])) {
+            // Optional: Log::warning("Skipping College {$code}: University code {$uniCode} not found.");
             return null;
         }
 
+        // 4. Data Normalization
         $location = isset($row['location']) ? trim($row['location']) : 'Urban';
         if (in_array($location, ['-', '.', ''])) $location = 'Urban';
 
-        $name = isset($row['name']) ? trim($row['name']) : '';
         if (strlen($name) > 250) $name = substr($name, 0, 250);
 
         return new College([
             'tenant_id'     => $this->tenant_id,
             'university_id' => $this->universities[$uniCode],
             'name'          => $name,
-            'code'          => $row['code'] ?? null,
+            'code'          => $code,
             'state'         => $row['state'] ?? null,
             'district'      => $row['district'] ?? null,
             'location'      => $location,

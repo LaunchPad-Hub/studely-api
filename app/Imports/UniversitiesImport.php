@@ -6,58 +6,67 @@ use App\Models\University;
 use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Concerns\ToModel;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-class UniversitiesImport implements ToModel, WithHeadingRow
+use Maatwebsite\Excel\Concerns\WithBatchInserts;
+use Maatwebsite\Excel\Concerns\WithChunkReading;
+
+class UniversitiesImport implements ToModel, WithHeadingRow, WithBatchInserts, WithChunkReading
 {
     private $existingCodes;
 
     public function __construct()
     {
-        // OPTIMIZATION: Load all existing codes into an array key-map for instant lookup.
-        // This prevents creating duplicates and avoids querying the DB for every single row.
-        $this->existingCodes = University::pluck('code')->toArray();
+        // Load existing codes as keys for O(1) lookup.
+        // pluck('code', 'code') creates an array like ['UNIV001' => 'UNIV001']
+        $this->existingCodes = University::pluck('code', 'code')->toArray();
     }
 
     /**
     * @param array $row
     *
     * @return \Illuminate\Database\Eloquent\Model|null
-    */public function model(array $row)
+    */
+    public function model(array $row)
     {
-        // Sanitize Code
+        // 1. Sanitize input
         $code = isset($row['code']) ? trim($row['code']) : null;
+        $name = isset($row['name']) ? trim($row['name']) : null;
 
-        // Duplicate Check
-        // If this code already exists in our DB list, SKIP this row (return null).
-        if ($code && isset($this->existingCodes[$code])) {
+        // 2. Skip Empty Rows
+        // If critical fields are missing, we consider the row empty/invalid
+        if (empty($code) || empty($name)) {
             return null;
         }
 
-        // Handle non-numeric years like "-"
-        $year = $row['founded'];
+        // 3. Duplicate Check
+        // If code exists in our pre-loaded list, skip to prevent unique constraint error
+        if (isset($this->existingCodes[$code])) {
+            return null;
+        }
+
+        // 4. Handle non-numeric years (e.g. "-" or empty)
+        $year = $row['founded'] ?? null;
         if (!is_numeric($year)) {
             $year = null;
         }
 
-        // $row keys match your Excel header names (converted to snake_case)
+        // 5. Create Record
         return new University([
-            'tenant_id'             => Auth::user()?->tenant_id, // Set tenant_id as needed
-            'code'                  => $row['code'],            // Excel header: "Code"
-            'name'                  => $row['name'],            // Excel header: "Name"
-            'state'                 => $row['state'],           // Excel header: "State"
-            'district'              => $row['district'],        // Excel header: "District"
-            'location'              => $row['location'],        // Excel header: "Location"
-            'website'               => $row['website'],         // Excel header: "Website"
-            'established_year'      => $year,         // Excel header: "Founded"
+            'tenant_id'        => Auth::user()?->tenant_id,
+            'code'             => $code,
+            'name'             => $name,
+            'state'            => $row['state'] ?? null,
+            'district'         => $row['district'] ?? null,
+            'location'         => $row['location'] ?? null,
+            'website'          => $row['website'] ?? null,
+            'established_year' => $year,
         ]);
     }
 
-    // Processing 1000 records at once is fast, but let's batch them to be safe
     public function batchSize(): int
     {
         return 500;
     }
 
-    // Read the file in chunks to keep memory usage low
     public function chunkSize(): int
     {
         return 500;

@@ -37,7 +37,7 @@ class AssessmentInvite extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: "Congratulations! You're qualified for the {$this->assessment?->title}",
+            subject: "Congratulations! {$this->assessment?->title} is now available",
         );
     }
 
