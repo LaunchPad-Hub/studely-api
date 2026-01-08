@@ -13,8 +13,8 @@ use Maatwebsite\Excel\Concerns\WithBatchInserts;
 use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
-use Maatwebsite\Excel\Concerns\WithLimit;
-use Maatwebsite\Excel\Concerns\WithStartRow;
+use Maatwebsite\Excel\Concerns\WithLimit;    // 1. Add Limit
+use Maatwebsite\Excel\Concerns\WithStartRow; // 2. Add StartRow
 
 class CollegesImport implements
     ToModel,
@@ -23,11 +23,10 @@ class CollegesImport implements
     WithChunkReading,
     WithCustomCsvSettings,
     ShouldQueue,
-    WithLimit,
-    WithStartRow
+    WithLimit,    // Implement
+    WithStartRow  // Implement
 {
     private $universities;
-    private $existingColleges;
     private $tenant_id;
     private $batch;
 
@@ -35,22 +34,15 @@ class CollegesImport implements
     public function __construct($batch = 1)
     {
         $this->tenant_id = Auth::user()?->tenant_id;
-        $this->batch = max(1, intval($batch));
+        $this->batch = max(1, intval($batch)); // Ensure at least 1
 
         // Force High Memory/Time Limits for this job
         ini_set('memory_limit', '2048M');
         ini_set('max_execution_time', 3600);
 
-        // Cache Universities map (Code -> ID)
         $this->universities = Cache::remember('uni_map_' . $this->tenant_id, 3600, function () {
             return University::pluck('id', 'code')->toArray();
         });
-
-        // Cache Existing Colleges to prevent duplicates (Code -> ID)
-        // This makes duplicate checking O(1) and prevents query spam
-        $this->existingColleges = College::where('tenant_id', $this->tenant_id)
-            ->pluck('id', 'code')
-            ->toArray();
     }
 
     // Limit to 15,000 rows per run
@@ -64,6 +56,7 @@ class CollegesImport implements
     {
         // Batch 1: Start at row 2 (Row 1 is header)
         // Batch 2: Start at row 15002
+        // Formula: (Batch - 1) * Limit + Start_Offset
         return ($this->batch - 1) * 15000 + 2;
     }
 
