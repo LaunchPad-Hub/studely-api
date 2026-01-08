@@ -27,6 +27,7 @@ class CollegesImport implements
     WithStartRow  // Implement
 {
     private $universities;
+    private $exisitingColleges;
     private $tenant_id;
     private $batch;
 
@@ -34,21 +35,29 @@ class CollegesImport implements
     public function __construct($batch = 1)
     {
         $this->tenant_id = Auth::user()?->tenant_id;
-        $this->batch = max(1, intval($batch)); // Ensure at least 1
+        $this->batch = max(1, intval($batch));
 
-        // Force High Memory/Time Limits for this job
+        // Force High Memory/Time Limits
         ini_set('memory_limit', '2048M');
         ini_set('max_execution_time', 3600);
 
+        // 1. Cache Universities map (Code -> ID)
+        // Cache for 1 hour to ensure consistency across chunks
         $this->universities = Cache::remember('uni_map_' . $this->tenant_id, 3600, function () {
             return University::pluck('id', 'code')->toArray();
         });
+
+        // 2. FIX: Cache Existing Colleges (Code -> ID)
+        // This was missing in your constructor but used in model()
+        $this->exisitingColleges = College::where('tenant_id', $this->tenant_id)
+            ->pluck('id', 'code')
+            ->toArray();
     }
 
     // Limit to 15,000 rows per run
     public function limit(): int
     {
-        return 15000;
+        return 100000;
     }
 
     // Calculate where to start based on the batch number
@@ -57,7 +66,7 @@ class CollegesImport implements
         // Batch 1: Start at row 2 (Row 1 is header)
         // Batch 2: Start at row 15002
         // Formula: (Batch - 1) * Limit + Start_Offset
-        return ($this->batch - 1) * 15000 + 2;
+        return ($this->batch - 1) * 100000 + 2;
     }
 
     public function model(array $row)
