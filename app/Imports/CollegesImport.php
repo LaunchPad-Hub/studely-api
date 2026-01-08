@@ -27,7 +27,7 @@ class CollegesImport implements
     WithStartRow  // Implement
 {
     private $universities;
-    private $exisitingColleges;
+    private $existingColleges;
     private $tenant_id;
     private $batch;
 
@@ -49,7 +49,7 @@ class CollegesImport implements
 
         // 2. FIX: Cache Existing Colleges (Code -> ID)
         // This was missing in your constructor but used in model()
-        $this->exisitingColleges = College::where('tenant_id', $this->tenant_id)
+        $this->existingColleges = College::where('tenant_id', $this->tenant_id)
             ->pluck('id', 'code')
             ->toArray();
     }
@@ -75,13 +75,13 @@ class CollegesImport implements
         $code = isset($row['code']) ? trim($row['code']) : null;
         $name = isset($row['name']) ? trim($row['name']) : null;
 
-        // Skip row if essential data is missing
+        // Skip if essential data is missing
         if (empty($code) || empty($name)) {
             return null;
         }
 
         // 2. Duplicate Check
-        // If this college code already exists, skip it.
+        // If this college code already exists in DB, skip it.
         if (isset($this->existingColleges[$code])) {
             return null;
         }
@@ -89,9 +89,8 @@ class CollegesImport implements
         // 3. Validation: University Code
         $uniCode = isset($row['university_code']) ? trim($row['university_code']) : null;
 
-        // Skip if university code is missing or doesn't exist in our DB
+        // Skip if university not found
         if (!$uniCode || !isset($this->universities[$uniCode])) {
-            // Optional: Log::warning("Skipping College {$code}: University code {$uniCode} not found.");
             return null;
         }
 
