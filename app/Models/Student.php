@@ -10,6 +10,7 @@ class Student extends Model
     use HasFactory;
 
     const STATUS_INVITED        = 'invited';
+    const STATUS_PENDING_BASELINE_APPROVAL = 'pending_baseline_approval';
     const STATUS_READY_BASELINE = 'ready_for_baseline';
     const BASELINE_IN_PROGRESS = 'baseline_in_progress';
     const STATUS_IN_TRAINING    = 'in_training';

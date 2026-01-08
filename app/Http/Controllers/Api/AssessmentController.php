@@ -96,6 +96,7 @@ class AssessmentController extends Controller
                 'students.id',
                 'students.reg_no',
                 'students.user_id',
+                'students.training_status',
                 // specific attempt columns
                 'attempts.id as attempt_id',
                 'attempts.submitted_at',
@@ -143,6 +144,7 @@ class AssessmentController extends Controller
                 'name' => $s->user->name ?? 'Unknown',
                 'email' => $s->user->email ?? '',
                 'reg_no' => $s->reg_no,
+                'training_status' => $s->training_status,
                 'status' => $status,
                 'score' => $s->score,
                 'total_marks' => $s->total_marks,
@@ -154,7 +156,8 @@ class AssessmentController extends Controller
     }
 
     /**
-     * Bulk assign/push assessment to students
+     * Bulk assign/push assessment to students.
+     * Updates student status based on assessment type.
      */
     public function assign(Request $request, $id)
     {
@@ -165,18 +168,39 @@ class AssessmentController extends Controller
         ]);
 
         $assessment = Assessment::where('tenant_id', $tid)->findOrFail($id);
-        $students = Student::whereIn('id', $data['student_ids'])->with('user')->get();
 
-        // Logic: Send Email Invites
+        $students = Student::whereIn('id', $data['student_ids'])
+            ->where('tenant_id', $tid)
+            ->with('user')
+            ->get();
+
+        // 1. Determine Target Status based on Assessment Title keywords
+        $targetStatus = null;
+        if (stripos($assessment->title, 'Baseline') !== false) {
+            $targetStatus = Student::STATUS_READY_BASELINE;
+        } elseif (stripos($assessment->title, 'Final') !== false) {
+            $targetStatus = Student::STATUS_READY_FINAL;
+        }
+
         $count = 0;
         foreach ($students as $student) {
+            // 2. Update Student Status if a lifecycle stage is matched
+            if ($targetStatus) {
+                // Prevent regressing a 'completed' student back to 'ready' if needed,
+                // but usually manual push overrides.
+                $student->update(['training_status' => $targetStatus]);
+            }
+
+            // 3. Send Email
             if ($student->user && $student->user->email) {
-                // Example: Queue an email
                 Mail::to($student->user)->queue(new AssessmentInvite($assessment, $student));
                 $count++;
             }
         }
 
-        return response()->json(['message' => "Assessment pushed to {$count} students."]);
+        return response()->json([
+            'message' => "Assessment pushed to {$count} students.",
+            'new_status' => $targetStatus
+        ]);
     }
 }

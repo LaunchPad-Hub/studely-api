@@ -27,7 +27,7 @@ return new class extends Migration
             $table->date('dob')->nullable();
             $table->year('admission_year')->nullable();
             $table->unsignedTinyInteger('current_semester')->nullable();
-            $table->string('training_status')->default('ready_for_baseline');
+            $table->string('training_status')->default('pending_baseline_approval');
             $table->string('status')->default('not_invited');
             $table->timestamps();
 

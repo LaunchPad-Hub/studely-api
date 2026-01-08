@@ -581,20 +581,26 @@ class DashboardController extends Controller
      */
     protected function computeStage(?Attempt $baselineAttempt, ?Attempt $finalAttempt, ?string $trainingStatus = null): string
     {
+        // 1. Explicit Status Checks (Highest Priority)
+        if ($trainingStatus === Student::STATUS_PENDING_BASELINE_APPROVAL) {
+            return 'pending_baseline_approval';
+        }
 
-        // Force Training
-        if ($trainingStatus === 'in_training') {
+        if ($trainingStatus === Student::STATUS_IN_TRAINING) {
             return 'in_training';
         }
 
-        // Check if strictly approved for baseline
-        if (!$baselineAttempt && $trainingStatus !== 'ready_for_baseline') {
-             // You might want a 'pending_approval' case here if strictly enforcing approval
-             // But usually, 'ready_for_baseline' is the default for new students in your logic
+        if ($trainingStatus === Student::STATUS_READY_FINAL) {
+            return 'ready_for_final';
         }
 
-        // Normal flow
+        if ($trainingStatus === Student::STATUS_COMPLETED) {
+            return 'completed';
+        }
+
+        // 2. Inferred Checks (Fallback based on attempts)
         if (!$baselineAttempt) {
+            // Default fallthrough if status isn't explicitly set to pending
             return 'ready_for_baseline';
         }
 
@@ -603,7 +609,10 @@ class DashboardController extends Controller
         }
 
         if ($baselineAttempt && $baselineAttempt->submitted_at && !$finalAttempt) {
-            return 'ready_for_final';
+            // Usually this means 'ready_for_final', but if we rely on explicit status,
+            // we might want to return 'in_training' if not yet approved for final.
+            // For now, let's assume if they finished baseline they wait for training or final.
+            return 'in_training';
         }
 
         if ($finalAttempt && !$finalAttempt->submitted_at) {
@@ -623,6 +632,13 @@ class DashboardController extends Controller
         $href = '/assessment/attempt';
 
         switch ($stage) {
+            case 'pending_baseline_approval':
+                return [
+                    'label'  => 'Awaiting Approval',
+                    'status' => 'locked',
+                    'helper' => 'Your account is being reviewed. Access will open shortly.',
+                    'href'   => null,
+                ];
             // Changed from 'baseline_not_started' to 'ready_for_baseline'
             case 'ready_for_baseline':
                 return [
