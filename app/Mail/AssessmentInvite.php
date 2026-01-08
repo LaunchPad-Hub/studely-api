@@ -47,7 +47,7 @@ class AssessmentInvite extends Mailable
     public function content(): Content
     {
         return new Content(
-            markdown: 'emails.final_assessment',
+            markdown: 'emails.assessment_invite',
         );
     }
 
